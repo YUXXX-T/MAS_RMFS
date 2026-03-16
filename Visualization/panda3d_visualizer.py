@@ -174,23 +174,31 @@ class Panda3DVisualizer(BaseVisualizer):
         cz = -((rows - 1) * CELL / 2)
 
         if is_3d:
-            # ---- 3D perspective with mouse orbit ----
+            # ---- 3D perspective with custom orbit camera ----
+            self._app.disableMouse()
+
             lens = PerspectiveLens()
-            lens.setFov(50)
+            lens.setFov(45)
             lens.setNearFar(0.5, 500)
             self._app.cam.node().setLens(lens)
 
-            dist = max(rows, cols) * CELL * 1.3
+            # Orbit camera state (spherical coords around pivot)
+            self._cam_pivot = LPoint3f(cx, 0, cz)
+            self._cam_heading = -45.0   # degrees
+            self._cam_pitch = 35.0      # degrees above horizon
+            self._cam_dist = max(rows, cols) * CELL * 1.5
+            self._mouse_prev = None
+            self._update_orbit_camera()
 
-            # Position camera, then transfer transform to trackball
-            self._app.disableMouse()
-            self._app.camera.setPos(cx + dist * 0.7, -dist * 0.7, cz + dist * 0.8)
-            self._app.camera.lookAt(cx, 0, cz)
-            cam_mat = self._app.camera.getMat(self._app.render)
-            self._app.enableMouse()
-            inv_mat = LMatrix4f()
-            inv_mat.invertFrom(cam_mat)
-            self._app.mouseInterfaceNode.setMat(inv_mat)
+            # Bind mouse events for orbit / pan / zoom
+            self._app.accept("mouse1",    self._on_mouse_down, [1])
+            self._app.accept("mouse1-up", self._on_mouse_up, [1])
+            self._app.accept("mouse3",    self._on_mouse_down, [3])
+            self._app.accept("mouse3-up", self._on_mouse_up, [3])
+            self._app.accept("wheel_up",  self._on_zoom, [-1])
+            self._app.accept("wheel_down", self._on_zoom, [1])
+            self._mouse_btn = 0
+            self._app.taskMgr.add(self._orbit_task, "orbit_camera")
         else:
             # ---- 2D orthographic ----
             self._app.disableMouse()
@@ -454,3 +462,78 @@ class Panda3DVisualizer(BaseVisualizer):
             f"Orders: {completed}/{total}   "
             f"Rate: {rate:.2f}/tick"
         )
+
+    # ── custom orbit camera (3D only) ────────────────────────────────
+
+    def _update_orbit_camera(self):
+        """Reposition camera from spherical coords around pivot."""
+        h_rad = math.radians(self._cam_heading)
+        p_rad = math.radians(self._cam_pitch)
+        d = self._cam_dist
+
+        # Spherical → Cartesian (Panda3D: Y = forward, Z = up)
+        cos_p = math.cos(p_rad)
+        cam_x = self._cam_pivot.x + d * cos_p * math.sin(h_rad)
+        cam_y = self._cam_pivot.y - d * cos_p * math.cos(h_rad)
+        cam_z = self._cam_pivot.z + d * math.sin(p_rad)
+
+        self._app.camera.setPos(cam_x, cam_y, cam_z)
+        self._app.camera.lookAt(self._cam_pivot)
+
+    def _on_mouse_down(self, btn):
+        self._mouse_btn = btn
+        self._mouse_prev = None
+
+    def _on_mouse_up(self, btn):
+        if self._mouse_btn == btn:
+            self._mouse_btn = 0
+            self._mouse_prev = None
+
+    def _on_zoom(self, direction):
+        """Scroll wheel zoom: direction -1 = zoom in, +1 = zoom out."""
+        factor = 1.15
+        if direction < 0:
+            self._cam_dist /= factor
+        else:
+            self._cam_dist *= factor
+        self._cam_dist = max(2.0, min(200.0, self._cam_dist))
+        self._update_orbit_camera()
+
+    def _orbit_task(self, task):
+        """Per-frame task: reads mouse position delta for orbit/pan."""
+        if not self._app.mouseWatcherNode.hasMouse():
+            return task.cont
+
+        mx = self._app.mouseWatcherNode.getMouseX()
+        my = self._app.mouseWatcherNode.getMouseY()
+
+        if self._mouse_btn == 0 or self._mouse_prev is None:
+            self._mouse_prev = (mx, my)
+            return task.cont
+
+        dx = mx - self._mouse_prev[0]
+        dy = my - self._mouse_prev[1]
+        self._mouse_prev = (mx, my)
+
+        if self._mouse_btn == 1:
+            # Left-drag → orbit
+            self._cam_heading += dx * 150
+            self._cam_pitch += dy * 100
+            self._cam_pitch = max(5.0, min(85.0, self._cam_pitch))
+            self._update_orbit_camera()
+
+        elif self._mouse_btn == 3:
+            # Right-drag → pan (move pivot in camera-local XZ plane)
+            h_rad = math.radians(self._cam_heading)
+            speed = self._cam_dist * 0.5
+
+            # Camera-right direction (on the XY ground plane)
+            rx = math.cos(h_rad)
+            ry = math.sin(h_rad)
+
+            self._cam_pivot.x -= dx * speed * rx
+            self._cam_pivot.y -= dx * speed * ry
+            self._cam_pivot.z += dy * speed
+            self._update_orbit_camera()
+
+        return task.cont
