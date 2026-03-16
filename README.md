@@ -12,6 +12,7 @@
 - [🔄 系统运行流程](#-系统运行流程)
 - [🧩 如何集成自定义算法](#-如何集成自定义算法)
 - [📦 已有算法列表](#-已有算法列表)
+- [🎮 Panda3D 可视化](#-panda3d-可视化)
 
 ---
 
@@ -54,7 +55,7 @@ MAS_RMFS/
 
 ### 📋 核心模块职责
 
-| 模块 | 职责 |
+| 模块 | 📌 职责 |
 |------|------|
 | `Config` | 从 JSON 文件加载并验证配置参数 |
 | `WorldState` | 维护仿真的全部状态（地图、智能体、货架、订单、任务） |
@@ -373,7 +374,7 @@ list_policies(category=None)     # 列出已注册的算法
 
 使用 `--p3d` 标志启动 Panda3D 可视化窗口，支持 **2D 正交投影** 和 **3D 透视投影** 两种模式。
 
-### 视角模式切换
+### 🔀 视角模式切换
 
 通过配置文件中的 `p3d_view_mode` 参数切换：
 
@@ -404,12 +405,14 @@ list_policies(category=None)     # 列出已注册的算法
 | 地板 | 平铺色块 + 网格线 |
 | 货架 | 3D 方块，浮在地板之上 |
 | 机器人 | 3D 方块 + 发光环（搬运时） |
-| 标签 | Billboard 效果，始终面向相机 |
-| HUD | 左上角显示 Tick / 订单数 / 完成率 |
+| 标签 | 🏷️ Billboard 效果，始终面向相机 |
+| HUD | 📊 左上角显示 Tick / 订单数 / 完成率 |
+| 坐标轴 | 🧭 左下角 3D 坐标系指示器（同步旋转） |
+| 键盘快捷键 | ⌨️ `1`=俯视 `2`=正视 `3`=侧视 `4`=等距 `R`=重置 |
 
 
 
-### 📋 TODO List
+### 📝 TODO List
 超大规模下——多进程解耦架构
 ```
 如果仿真和渲染会互相拖慢，可以用 ZeroMQ 做进程间通信：
@@ -423,9 +426,11 @@ list_policies(category=None)     # 列出已注册的算法
 渲染端未来可以换成 任何引擎（Panda3D、Godot、甚至 C++ 自定义），只要它能读 ZeroMQ 消息。
 ```
 
-### DEMO (Current)
-![demo_3d](./demo_3d.png)
-![demo_mpl](./demo_mpl.png)
+### 🎬 DEMO (Current)
+🔷 Simulation in 3D:
+![demo_3d](./demo/demo_3d.png)
+🔶 Simulation in 2D (achieved by matplotlib):
+![demo_mpl](./demo/demo_mpl.png)
 
 ## 📄 License
 
