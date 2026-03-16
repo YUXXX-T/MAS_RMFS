@@ -213,7 +213,7 @@ class Panda3DVisualizer(BaseVisualizer):
 
         wp = WindowProperties()
         mode_label = "3D" if is_3d else "2D"
-        wp.set标题(f"MAS-RMFS  —  Panda3D {mode_label}")
+        wp.setTitle(f"MAS-RMFS  —  Panda3D {mode_label}")
         if self._parent_window_handle is not None:
             wp.setParentWindow(self._parent_window_handle)
             wp.setOrigin(0, 0)

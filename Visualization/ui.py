@@ -256,7 +256,7 @@ class SimulationUI(QMainWindow):
     """
     Qt main window with embedded Panda3D render, control panel,
     and toggleable matplotlib charts (timeline, density, throughput).
-    包含嵌入式 Panda3D 渲染视图、控制面板，以及可切换的 Matplotlib 图表（时间轴、密度、吞吐量）的 Qt 主窗口。
+    
     """
 
     def __init__(
@@ -302,7 +302,7 @@ class SimulationUI(QMainWindow):
     # ── UI 构建 ───────────────────────────────────────────────
 
     def _build_ui(self):
-        self.setWindow标题("MAS-RMFS  \u2014  Simulation")
+        self.setWindowTitle("MAS-RMFS  \u2014  Simulation")
         self.resize(1400, 900)
 
         # 外层垂直分割器：上 = 主区域，下 = 图表
