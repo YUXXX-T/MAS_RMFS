@@ -57,7 +57,7 @@ _DARK_PALETTE = {
 }
 
 _LIGHT_PALETTE = {
-    "bg":       LVecBase4f(0.96, 0.96, 0.98, 1),
+    "bg":       LVecBase4f(1.0, 1.0, 1.0, 1),
     "free":     LVecBase4f(0.92, 0.92, 0.95, 1),
     "obstacle": LVecBase4f(0.55, 0.55, 0.60, 1),
     "station":  LVecBase4f(0.90, 0.25, 0.30, 1),
@@ -160,6 +160,7 @@ class Panda3DVisualizer(BaseVisualizer):
         self._glow_nodes: dict[int, NodePath] = {}
         self._hud_text: TextNode | None = None
         self._hud_np: NodePath | None = None
+        self._parent_window_handle: int | None = None
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -186,16 +187,34 @@ class Panda3DVisualizer(BaseVisualizer):
         self._map_size = (rows, cols)
 
         # ---- ShowBase ----
+        if self._parent_window_handle is not None:
+            from panda3d.core import loadPrcFileData
+            loadPrcFileData("", "window-type none")
+            loadPrcFileData("", "win-foreground-window 0")
+
         self._app = ShowBase()
-        self._app.setBackgroundColor(self._pal["bg"])
 
         wp = WindowProperties()
         mode_label = "3D" if is_3d else "2D"
         wp.setTitle(f"MAS-RMFS  —  Panda3D {mode_label}")
+        if self._parent_window_handle is not None:
+            wp.setParentWindow(self._parent_window_handle)
+            wp.setOrigin(0, 0)
         wp.setSize(1024, 768) if is_3d else wp.setSize(900, 900)
-        self._app.win.requestProperties(wp)
 
+        if self._parent_window_handle is not None:
+            self._app.openMainWindow(props=wp)
+        else:
+            self._app.win.requestProperties(wp)
+
+        # Set background AFTER window exists
+        self._app.setBackgroundColor(self._pal["bg"])
         self._app.render.setAntialias(AntialiasAttrib.MMultisample)
+
+        # Track window size for aspect ratio correction
+        self._win_aspect = (wp.getXSize() / wp.getYSize()
+                            if wp.getYSize() > 0 else 1.0)
+        self._app.accept("window-event", self._on_window_event)
 
         # Centre of the grid in world coords
         # 3D: X = col, Y = -row (depth), Z = up
@@ -246,12 +265,23 @@ class Panda3DVisualizer(BaseVisualizer):
             lens = OrthographicLens()
             half_w = cols * CELL / 2 + 1.0
             half_h = rows * CELL / 2 + 1.0
-            lens.setFilmSize(half_w * 2, half_h * 2)
+            self._ortho_film_w = half_w * 2
+            self._ortho_film_h = half_h * 2
+            lens.setFilmSize(self._ortho_film_w, self._ortho_film_h)
             lens.setNearFar(-100, 100)
             self._app.cam.node().setLens(lens)
 
             self._app.cam.setPos(cx, -10, cz_2d)
             self._app.cam.lookAt(cx, 0, cz_2d)
+
+            # 2D mouse controls: scroll = zoom, right-drag = pan
+            self._app.accept("wheel_up",   self._on_zoom_2d, [-1])
+            self._app.accept("wheel_down",  self._on_zoom_2d, [1])
+            self._app.accept("mouse3",      self._on_mouse_down, [3])
+            self._app.accept("mouse3-up",   self._on_mouse_up, [3])
+            self._mouse_btn = 0
+            self._mouse_prev = None
+            self._app.taskMgr.add(self._pan_task_2d, "pan_2d")
 
         # ---- Static grid cells ----
         if self._use_gpu:
@@ -544,6 +574,32 @@ class Panda3DVisualizer(BaseVisualizer):
             self._help_np.setScale(0.04)
             self._help_np.setPos(1.3, 0, -0.92)
 
+    # ── window resize aspect-ratio correction ─────────────────────────
+
+    def _on_window_event(self, window):
+        """Correct lens aspect ratio when window is resized."""
+        if window is None or window != self._app.win:
+            return
+        w = window.getXSize()
+        h = window.getYSize()
+        if h == 0:
+            return
+        aspect = w / h
+        if abs(aspect - self._win_aspect) < 0.001:
+            return  # no meaningful change
+        self._win_aspect = aspect
+
+        lens = self._app.cam.node().getLens()
+        if self._is_3d:
+            # Perspective: set aspect ratio directly
+            lens.setAspectRatio(aspect)
+        else:
+            # Ortho: adjust film width while keeping height constant
+            # so vertical extent stays the same and horizontal
+            # extends proportionally → no distortion
+            self._ortho_film_w = self._ortho_film_h * aspect
+            lens.setFilmSize(self._ortho_film_w, self._ortho_film_h)
+
     # ── custom orbit camera (3D only) ────────────────────────────────
 
     def _update_orbit_camera(self):
@@ -571,7 +627,7 @@ class Panda3DVisualizer(BaseVisualizer):
             self._mouse_prev = None
 
     def _on_zoom(self, direction):
-        """Scroll wheel zoom: direction -1 = zoom in, +1 = zoom out."""
+        """Scroll wheel zoom (3D): direction -1 = zoom in, +1 = zoom out."""
         factor = 1.15
         if direction < 0:
             self._cam_dist /= factor
@@ -579,6 +635,42 @@ class Panda3DVisualizer(BaseVisualizer):
             self._cam_dist *= factor
         self._cam_dist = max(2.0, min(200.0, self._cam_dist))
         self._update_orbit_camera()
+
+    def _on_zoom_2d(self, direction):
+        """Scroll wheel zoom (2D): adjust ortho film size for proportional scaling."""
+        factor = 1.12
+        if direction < 0:
+            self._ortho_film_w /= factor
+            self._ortho_film_h /= factor
+        else:
+            self._ortho_film_w *= factor
+            self._ortho_film_h *= factor
+        # Clamp to reasonable range
+        self._ortho_film_w = max(2.0, min(200.0, self._ortho_film_w))
+        self._ortho_film_h = max(2.0, min(200.0, self._ortho_film_h))
+        lens = self._app.cam.node().getLens()
+        lens.setFilmSize(self._ortho_film_w, self._ortho_film_h)
+
+    def _pan_task_2d(self, task):
+        """Right-drag pan for 2D orthographic view."""
+        if not self._app.mouseWatcherNode.hasMouse():
+            return task.cont
+        mx = self._app.mouseWatcherNode.getMouseX()
+        mz = self._app.mouseWatcherNode.getMouseY()
+        if self._mouse_btn == 3:
+            if self._mouse_prev is not None:
+                dx = mx - self._mouse_prev[0]
+                dz = mz - self._mouse_prev[1]
+                # Scale pan speed by current film size for consistent feel
+                scale = self._ortho_film_w * 0.5
+                pos = self._app.cam.getPos()
+                self._app.cam.setPos(
+                    pos.x - dx * scale,
+                    pos.y,
+                    pos.z - dz * scale,
+                )
+            self._mouse_prev = (mx, mz)
+        return task.cont
 
     def _set_view_preset(self, name):
         """Snap camera to a preset view angle."""

@@ -102,7 +102,7 @@ def main():
     else:
         visualizer = None
 
-    # --- Create and run engine ---
+    # --- Create engine ---
     engine = SimulationEngine(
         config=config,
         order_generator=order_generator,
@@ -110,7 +110,19 @@ def main():
         path_planner=path_planner,
         visualizer=visualizer,
     )
-    engine.run()
+
+    # --- Run ---
+    if args.p3d and visualizer is not None:
+        # Qt UI drives the loop (replaces engine.run)
+        from Visualization.ui import SimulationUI
+        ui = SimulationUI(
+            engine=engine,
+            visualizer=visualizer,
+            night_mode=config.simulation.night_mode,
+        )
+        ui.run()
+    else:
+        engine.run()
 
 
 if __name__ == "__main__":

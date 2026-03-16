@@ -124,7 +124,10 @@ python main.py --config path/to/my_config.json
         "station_process_duration": 5,  // 工作站处理暂停 tick 数
         "tick_delay": 0.5,              // 每 tick 间隔秒数（0=全速）
         "p3d_view_mode": "3d",          // Panda3D 视角："2d" 或 "3d"
-        "log_level": "INFO"
+        "p3d_use_gpu": false,           // 🚀 启用 GPU 批量渲染/实例化
+        "night_mode": true,             // 🌙 true=深色主题，false=白色主题
+        "log_level": "INFO",            // 日志级别
+        "log_file": null                // 日志输出文件（null=仅控制台）
     },
     "policies": {
         // 支持两种写法：
@@ -426,7 +429,8 @@ list_policies(category=None)     # 列出已注册的算法
 
 
 ### 📝 TODO List
-超大规模下——多进程解耦架构
+
+🔧 **超大规模下——多进程解耦架构**
 ```
 如果仿真和渲染会互相拖慢，可以用 ZeroMQ 做进程间通信：
 ┌──────────────────┐    ZeroMQ (TCP/IPC)    ┌────────────────────┐
@@ -438,24 +442,26 @@ list_policies(category=None)     # 列出已注册的算法
 
 渲染端未来可以换成 任何引擎（Panda3D、Godot、甚至 C++ 自定义），只要它能读 ZeroMQ 消息。
 ```
-Inventory model and Inventory lookup policy
+🛒 **Inventory model and Inventory lookup policy**
 ```
-current:
+📦 current:
 Pod = 1 atomic unit — each Pod only has a pod_id, a home_position, and a current_position. There's no concept of SKU, product type, or inventory inside a pod.
 Order = a list of pod IDs — an Order directly says "bring Pod #3 and Pod #7 to Station 1". There's no "I need product X" → "which pod has product X?" lookup.
 
-multi-product:
-Add an inventory model — each pod stores a dict[str, int] mapping SKU → quantity
-Change orders to reference SKU names instead of pod IDs
-Add an inventory lookup policy that decides which pod to fetch for a given SKU (e.g., nearest pod containing that SKU)
+🆕 multi-product:
+🆕 Add an inventory model — each pod stores a dict[str, int] mapping SKU → quantity
+🆕 Change orders to reference SKU names instead of pod IDs
+🆕 Add an inventory lookup policy that decides which pod to fetch for a given SKU (e.g., nearest pod containing that SKU)
 ```
 
 
 
 ### 🎬 DEMO (Current)
-🔷 Simulation in 3D:
+🔷 Simulation in 2D:
+![demo_2d](./pic/demo_2d.png)
+🔶 Simulation in 3D:
 ![demo_3d](./pic/demo_3d.png)
-🔶 Simulation in 2D (achieved by matplotlib):
+🟠 Simulation in 2D (achieved by matplotlib):
 ![demo_mpl](./pic/demo_mpl.png)
 
 ## 📄 License
