@@ -71,6 +71,8 @@
         "pickup_duration": 2,
         "dropoff_duration": 2,
         "station_process_duration": 5,
+        "tick_delay": 0.5,
+        "p3d_view_mode": "3d",
         "log_level": "INFO",
         "log_file": null
     },

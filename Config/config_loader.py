@@ -65,6 +65,8 @@ class SimulationParams:
     pickup_duration: int = 2          # Ticks to pause when picking up a pod
     dropoff_duration: int = 2         # Ticks to pause when dropping off a pod
     station_process_duration: int = 5 # Ticks to process at workstation
+    tick_delay: float = 0.0           # Seconds to sleep between ticks (0 = no delay)
+    p3d_view_mode: str = "2d"         # Panda3D camera: "2d" (ortho) or "3d" (perspective)
     log_level: str = "INFO"
     log_file: Optional[str] = None
 
@@ -136,6 +138,8 @@ def load_config(path: str) -> SimulationConfig:
         pickup_duration=sim_raw.get("pickup_duration", 2),
         dropoff_duration=sim_raw.get("dropoff_duration", 2),
         station_process_duration=sim_raw.get("station_process_duration", 5),
+        tick_delay=sim_raw.get("tick_delay", 0.0),
+        p3d_view_mode=sim_raw.get("p3d_view_mode", "2d"),
         log_level=sim_raw.get("log_level", "INFO"),
         log_file=sim_raw.get("log_file", None),
     )

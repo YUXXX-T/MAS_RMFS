@@ -46,7 +46,8 @@ MAS_RMFS/
 │       ├── base_task_assigner.py
 │       └── GreedyTaskAssigner/
 ├── Visualization/                # 可视化
-│   └── visualizer.py             # 终端 ASCII / Matplotlib 仪表盘
+│   ├── visualizer.py             # 终端 ASCII / Matplotlib 仪表盘
+│   └── panda3d_visualizer.py     # Panda3D 2D/3D 可视化
 └── Debug/
     └── logger.py                 # 日志工具
 ```
@@ -72,12 +73,17 @@ python main.py
 # 使用 Matplotlib 仪表盘
 python main.py --mpl
 
+# 使用 Panda3D 可视化（2D 正交或 3D 透视，由配置决定）
+python main.py --p3d
+
 # 使用终端 ASCII 可视化
 python main.py --visualize
 
 # 指定自定义配置文件
 python main.py --config path/to/my_config.json
 ```
+
+> `--mpl`、`--p3d`、`--visualize` 三者互斥，只能选择其一。
 
 按 `Ctrl+C` 可安全停止仿真并输出统计摘要。
 
@@ -111,6 +117,8 @@ python main.py --config path/to/my_config.json
         "pickup_duration": 2,           // 拾取货架暂停 tick 数
         "dropoff_duration": 2,          // 放下货架暂停 tick 数
         "station_process_duration": 5,  // 工作站处理暂停 tick 数
+        "tick_delay": 0.5,              // 每 tick 间隔秒数（0=全速）
+        "p3d_view_mode": "3d",          // Panda3D 视角："2d" 或 "3d"
         "log_level": "INFO"
     },
     "policies": {
@@ -358,6 +366,46 @@ list_policies(category=None)     # 列出已注册的算法
 | 算法名 | 说明 | 可配参数 |
 |--------|------|---------|
 | `GreedyTaskAssigner` | 贪心分配：按距离选择最近的空闲智能体 | — |
+
+---
+
+## 🎮 Panda3D 可视化
+
+使用 `--p3d` 标志启动 Panda3D 可视化窗口，支持 **2D 正交投影** 和 **3D 透视投影** 两种模式。
+
+### 视角模式切换
+
+通过配置文件中的 `p3d_view_mode` 参数切换：
+
+```json
+"simulation": {
+    "p3d_view_mode": "3d",   // "2d" = 正交俯视，"3d" = 透视立体
+    "tick_delay": 0.5         // 控制仿真速度（秒/tick）
+}
+```
+
+### 📷 2D 模式
+
+| 特性 | 说明 |
+|------|------|
+| 相机 | 正交投影，俯视全局 |
+| 网格 | 平面色块（障碍物=灰色、工作站=红色、货架区=青影） |
+| 货架 | 青色小方块，搬运时隐藏 |
+| 机器人 | 彩色圆形 + ID 标签，搬运时显示发光环 |
+| 鼠标 | 无交互 |
+
+### 🌍 3D 模式
+
+| 特性 | 说明 |
+|------|------|
+| 相机 | 透视投影，等距角度俯瞰 |
+| 鼠标控制 | ⭐ **左键拖动** = 旋转，**右键拖动** = 平移，**滚轮** = 缩放 |
+| 障碍物 | 立体方块，有高度感 |
+| 地板 | 平铺色块 + 网格线 |
+| 货架 | 3D 方块，浮在地板之上 |
+| 机器人 | 3D 方块 + 发光环（搬运时） |
+| 标签 | Billboard 效果，始终面向相机 |
+| HUD | 左上角显示 Tick / 订单数 / 完成率 |
 
 
 

@@ -90,6 +90,9 @@ class SimulationEngine:
         try:
             while self._running:
                 self._tick()
+                if self.config.simulation.tick_delay > 0:
+                    import time
+                    time.sleep(self.config.simulation.tick_delay)
         except Exception as e:
             self.logger.error(f"Simulation error: {e}")
             raise
