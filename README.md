@@ -360,6 +360,22 @@ list_policies(category=None)     # 列出已注册的算法
 | `GreedyTaskAssigner` | 贪心分配：按距离选择最近的空闲智能体 | — |
 
 
+
+
+### 📋 TODO List
+超大规模下——多进程解耦架构
+如果仿真和渲染会互相拖慢，可以用 ZeroMQ 做进程间通信：
+┌──────────────────┐    ZeroMQ (TCP/IPC)    ┌────────────────────┐
+│ Python 仿真进程   │ ────────────────────▶ │ 渲染进程            │
+│ (event_engine)   │    序列化 world_state   │ (Panda3D / Godot)  │
+│ 纯逻辑计算        │ ◀───────────────────── │ GPU 渲染           │
+│                  │    用户输入/控制命令     │ 原生桌面窗口        │
+└──────────────────┘                        └─────────────────────┘
+
+渲染端未来可以换成 任何引擎（Panda3D、Godot、甚至 C++ 自定义），只要它能读 ZeroMQ 消息。
+
+
+
 ## 📄 License
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
