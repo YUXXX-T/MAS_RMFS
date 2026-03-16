@@ -79,13 +79,20 @@ class GreedyTaskAssigner(BaseTaskAssigner):
                 deliver_task.agent_id = agent.agent_id
                 deliver_task.status = TaskStatus.ASSIGNED
 
-                # Create RETURN task: return pod to its home
+                # Create RETURN task: return pod to designated location
+                if self.pod_return_planner is not None:
+                    return_dest = self.pod_return_planner.plan_return(
+                        pod, station_pos, world_state
+                    )
+                else:
+                    return_dest = pod.home_position
+
                 return_task = Task(
                     task_type=TaskType.RETURN,
                     order_id=order.order_id,
                     pod_id=pod_id,
                     source=station_pos,
-                    destination=pod.home_position,
+                    destination=return_dest,
                 )
                 return_task.agent_id = agent.agent_id
                 return_task.status = TaskStatus.ASSIGNED

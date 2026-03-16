@@ -322,11 +322,12 @@ class SimulationEngine:
             elif active_task.task_type == TaskType.RETURN:
                 pod = self.world.pod_state.get_pod(active_task.pod_id)
                 if pod:
-                    pod.put_down(pod.home_position)
+                    drop_pos = active_task.destination
+                    pod.put_down(drop_pos)
                     agent.carried_pod_id = None
                     self.logger.info(
                         f"[Tick {tick}] Agent #{agent.agent_id} returned "
-                        f"Pod #{pod.pod_id} to home {pod.home_position}"
+                        f"Pod #{pod.pod_id} to {drop_pos}"
                     )
                 active_task.status = TaskStatus.COMPLETED
                 agent.clear_path()

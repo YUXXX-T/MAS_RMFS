@@ -18,7 +18,16 @@ class BaseTaskAssigner(ABC):
 
     Implementations decide how to decompose orders into tasks
     and assign them to available agents.
+
+    Attributes
+    ----------
+    pod_return_planner : BasePodReturnPlanner or None
+        Optional return planner injected after construction.
+        If set, used to determine where pods are returned.
     """
+
+    def __init__(self):
+        self.pod_return_planner = None  # injected by main.py
 
     @abstractmethod
     def assign(self, world_state: "WorldState") -> List["Task"]:

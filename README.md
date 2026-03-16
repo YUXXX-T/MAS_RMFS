@@ -43,9 +43,13 @@ MAS_RMFS/
 │   │   ├── base_path_planner.py
 │   │   ├── AStarPathPlanner/
 │   │   └── PrioritizedPathPlanner/
-│   └── TaskAssigner/             # 任务分配器
-│       ├── base_task_assigner.py
-│       └── GreedyTaskAssigner/
+│   ├── TaskAssigner/             # 任务分配器
+│   │   ├── base_task_assigner.py
+│   │   └── GreedyTaskAssigner/
+│   └── PodReturnPlanner/         # 货架归还规划器 (interface)
+│       ├── base_pod_return_planner.py
+│       ├── HomeReturnPlanner/
+│       └── NearestSlotPlanner/
 ├── Visualization/                # 可视化
 │   ├── visualizer.py             # 终端 ASCII / Matplotlib 仪表盘
 │   └── panda3d_visualizer.py     # Panda3D 2D/3D 可视化
@@ -135,7 +139,8 @@ python main.py --config path/to/my_config.json
         "path_planner": {
             "name": "PrioritizedPathPlanner",
             "params": { "max_horizon": 100, "goal_reserve": 10 }
-        }
+        },
+        "pod_return_planner": "HomeReturnPlanner"
     }
 }
 ```
@@ -324,13 +329,14 @@ register("path_planner", "MyNewPlanner", MyNewPlanner)  # ← 新增
 
 完成！无需修改 `main.py` 或 `simulation_engine.py` 中的任何代码。
 
-### 📐 三种策略的接口汇总
+### 📐 四种策略的接口汇总
 
 | 策略类型 | 基类 | 需实现的方法 | 方法签名 |
 |---------|------|-------------|---------|
-| 订单生成器 | `BaseOrderGenerator` | `generate()` | `generate(world_state) → list[Order]` |
-| 任务分配器 | `BaseTaskAssigner` | `assign()` | `assign(world_state) → list[Task]` |
-| 路径规划器 | `BasePathPlanner` | `plan()` | `plan(agent, goal, world_state) → list[tuple]` |
+| 🛢️ 订单生成器 | `BaseOrderGenerator` | `generate()` | `generate(world_state) → list[Order]` |
+| 📋 任务分配器 | `BaseTaskAssigner` | `assign()` | `assign(world_state) → list[Task]` |
+| 🗺️ 路径规划器 | `BasePathPlanner` | `plan()` | `plan(agent, goal, world_state) → list[tuple]` |
+| 📦 货架归还规划器 | `BasePodReturnPlanner` | `plan_return()` | `plan_return(pod, station_pos, world_state) → tuple` |
 
 ### 🏭 策略注册中心工作原理
 
@@ -367,6 +373,13 @@ list_policies(category=None)     # 列出已注册的算法
 | 算法名 | 说明 | 可配参数 |
 |--------|------|---------|
 | `GreedyTaskAssigner` | 贪心分配：按距离选择最近的空闲智能体 | — |
+
+### 📦 货架归还规划器（PodReturnPlanner）
+
+| 算法名 | 说明 | 可配参数 |
+|--------|------|---------|
+| `HomeReturnPlanner` | 始终返回货架的原始位置（默认） | — |
+| `NearestSlotPlanner` | 返回距工作站最近的空闲货架位 | — |
 
 ---
 

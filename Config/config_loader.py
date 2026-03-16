@@ -55,6 +55,7 @@ class PolicyConfig:
     order_generator: Tuple[str, Dict[str, Any]] = ("RandomOrderGenerator", {})
     task_assigner: Tuple[str, Dict[str, Any]] = ("GreedyTaskAssigner", {})
     path_planner: Tuple[str, Dict[str, Any]] = ("AStarPathPlanner", {})
+    pod_return_planner: Tuple[str, Dict[str, Any]] = ("HomeReturnPlanner", {})
 
 
 @dataclass
@@ -162,6 +163,8 @@ def load_config(path: str) -> SimulationConfig:
             pol_raw.get("task_assigner"), "GreedyTaskAssigner"),
         path_planner=_parse_policy_entry(
             pol_raw.get("path_planner"), "AStarPathPlanner"),
+        pod_return_planner=_parse_policy_entry(
+            pol_raw.get("pod_return_planner"), "HomeReturnPlanner"),
     )
 
     return SimulationConfig(

@@ -90,6 +90,7 @@
                 "max_horizon": 100,
                 "goal_reserve": 10
             }
-        }
+        },
+        "pod_return_planner": "HomeReturnPlanner"
     }
 }

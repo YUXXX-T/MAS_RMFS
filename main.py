@@ -61,14 +61,17 @@ def main():
     og_name, og_params = config.policies.order_generator
     ta_name, ta_params = config.policies.task_assigner
     pp_name, pp_params = config.policies.path_planner
+    rp_name, rp_params = config.policies.pod_return_planner
 
     OrderGeneratorCls = get_policy("order_generator", og_name)
     TaskAssignerCls = get_policy("task_assigner", ta_name)
     PathPlannerCls = get_policy("path_planner", pp_name)
+    PodReturnPlannerCls = get_policy("pod_return_planner", rp_name)
 
     logger.info(f"Policies: order_generator={og_name}, "
                 f"task_assigner={ta_name}, "
-                f"path_planner={pp_name}")
+                f"path_planner={pp_name}, "
+                f"pod_return_planner={rp_name}")
 
     order_generator = OrderGeneratorCls(
         order_interval=config.simulation.order_interval,
@@ -77,6 +80,10 @@ def main():
     )
     task_assigner = TaskAssignerCls(**ta_params)
     path_planner = PathPlannerCls(**pp_params)
+    pod_return_planner = PodReturnPlannerCls(**rp_params)
+
+    # Inject return planner into the task assigner
+    task_assigner.pod_return_planner = pod_return_planner
 
     # --- Optional visualizer ---
     if args.mpl:
