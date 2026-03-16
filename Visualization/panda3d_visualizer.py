@@ -42,17 +42,34 @@ if TYPE_CHECKING:
 from Visualization.visualizer import BaseVisualizer
 
 
-# ─── colour palette ──────────────────────────────────────────────────
-_CLR_BG       = LVecBase4f(0.08, 0.08, 0.14, 1)
-_CLR_FREE     = LVecBase4f(0.12, 0.12, 0.20, 1)
-_CLR_OBSTACLE = LVecBase4f(0.28, 0.28, 0.34, 1)
-_CLR_STATION  = LVecBase4f(0.85, 0.22, 0.28, 1)
-_CLR_POD_HOME = LVecBase4f(0.12, 0.22, 0.26, 1)
-_CLR_POD      = LVecBase4f(0.18, 0.77, 0.71, 1)
-_CLR_GRID     = LVecBase4f(0.20, 0.20, 0.33, 0.6)
-_CLR_TEXT     = LVecBase4f(0.90, 0.90, 0.90, 1)
+# ─── colour palettes ────────────────────────────────────────────────────────
+_DARK_PALETTE = {
+    "bg":       LVecBase4f(0.08, 0.08, 0.14, 1),
+    "free":     LVecBase4f(0.12, 0.12, 0.20, 1),
+    "obstacle": LVecBase4f(0.28, 0.28, 0.34, 1),
+    "station":  LVecBase4f(0.85, 0.22, 0.28, 1),
+    "pod_home": LVecBase4f(0.12, 0.22, 0.26, 1),
+    "pod":      LVecBase4f(0.18, 0.77, 0.71, 1),
+    "grid":     LVecBase4f(0.20, 0.20, 0.33, 0.6),
+    "text":     LVecBase4f(0.90, 0.90, 0.90, 1),
+    "gizmo_bg": LVecBase4f(0.06, 0.06, 0.10, 1),
+    "grid_line": (0.25, 0.25, 0.40, 0.4),
+}
 
-# Robot colours (tab10-like)
+_LIGHT_PALETTE = {
+    "bg":       LVecBase4f(0.96, 0.96, 0.98, 1),
+    "free":     LVecBase4f(0.92, 0.92, 0.95, 1),
+    "obstacle": LVecBase4f(0.55, 0.55, 0.60, 1),
+    "station":  LVecBase4f(0.90, 0.25, 0.30, 1),
+    "pod_home": LVecBase4f(0.82, 0.90, 0.92, 1),
+    "pod":      LVecBase4f(0.10, 0.62, 0.56, 1),
+    "grid":     LVecBase4f(0.70, 0.70, 0.78, 0.6),
+    "text":     LVecBase4f(0.15, 0.15, 0.15, 1),
+    "gizmo_bg": LVecBase4f(0.88, 0.88, 0.92, 1),
+    "grid_line": (0.60, 0.60, 0.70, 0.5),
+}
+
+# Robot colours (tab10-like) — shared by both themes
 _ROBOT_COLOURS = [
     LVecBase4f(0.12, 0.47, 0.71, 1),   # blue
     LVecBase4f(1.00, 0.50, 0.05, 1),   # orange
@@ -127,9 +144,12 @@ class Panda3DVisualizer(BaseVisualizer):
         ``"3d"`` for isometric perspective with mouse orbit.
     """
 
-    def __init__(self, view_mode: str = "2d", use_gpu: bool = False):
+    def __init__(self, view_mode: str = "2d", use_gpu: bool = False,
+                 night_mode: bool = True):
         self._view_mode = view_mode.lower()
         self._use_gpu = use_gpu
+        self._night_mode = night_mode
+        self._pal = _DARK_PALETTE if night_mode else _LIGHT_PALETTE
         self._app: ShowBase | None = None
         self._initialised = False
 
@@ -167,7 +187,7 @@ class Panda3DVisualizer(BaseVisualizer):
 
         # ---- ShowBase ----
         self._app = ShowBase()
-        self._app.setBackgroundColor(_CLR_BG)
+        self._app.setBackgroundColor(self._pal["bg"])
 
         wp = WindowProperties()
         mode_label = "3D" if is_3d else "2D"
@@ -278,7 +298,7 @@ class Panda3DVisualizer(BaseVisualizer):
         # GPU: create one template and instance it
         if self._use_gpu and is_3d:
             pod_template = _make_box("pod_tpl", CELL * 0.6, CELL * 0.6, CELL * 0.35)
-            pod_template.setColor(_CLR_POD)
+            pod_template.setColor(self._pal["pod"])
             pod_template.setTransparency(TransparencyAttrib.MAlpha)
             pod_template.flattenStrong()
         else:
@@ -296,7 +316,7 @@ class Panda3DVisualizer(BaseVisualizer):
                     np = _make_box("pod", CELL * 0.6, CELL * 0.6, CELL * 0.35)
                     np.reparentTo(pod_root)
                     np.setPos(pc * CELL, -pr * CELL, CELL * 0.175)
-                    np.setColor(_CLR_POD)
+                    np.setColor(self._pal["pod"])
                     np.setTransparency(TransparencyAttrib.MAlpha)
             else:
                 pod_cm = CardMaker("pod")
@@ -304,7 +324,7 @@ class Panda3DVisualizer(BaseVisualizer):
                 pod_cm.setFrame(-s, s, -s, s)
                 np = pod_root.attachNewNode(pod_cm.generate())
                 np.setPos(pc * CELL, -0.2, -pr * CELL)
-                np.setColor(_CLR_POD)
+                np.setColor(self._pal["pod"])
                 np.setTransparency(TransparencyAttrib.MAlpha)
             self._pod_nodes[pod.pod_id] = np
 
@@ -365,7 +385,7 @@ class Panda3DVisualizer(BaseVisualizer):
 
         # ---- HUD text ----
         self._hud_text = TextNode("hud")
-        self._hud_text.setTextColor(_CLR_TEXT)
+        self._hud_text.setTextColor(self._pal["text"])
         self._hud_text.setAlign(TextNode.ALeft)
         self._hud_text.setShadow(0.05, 0.05)
         self._hud_text.setShadowColor(0, 0, 0, 0.8)
@@ -387,13 +407,13 @@ class Panda3DVisualizer(BaseVisualizer):
             for c in range(cols):
                 cell = ms.grid[r][c]
                 if cell == CellType.OBSTACLE:
-                    clr = _CLR_OBSTACLE
+                    clr = self._pal["obstacle"]
                 elif cell == CellType.STATION:
-                    clr = _CLR_STATION
+                    clr = self._pal["station"]
                 elif cell == CellType.POD_HOME:
-                    clr = _CLR_POD_HOME
+                    clr = self._pal["pod_home"]
                 else:
-                    clr = _CLR_FREE
+                    clr = self._pal["free"]
                 np = parent.attachNewNode(cm.generate())
                 np.setPos(c * CELL, 0, -r * CELL)
                 np.setColor(clr)
@@ -418,23 +438,23 @@ class Panda3DVisualizer(BaseVisualizer):
                     box = _make_box("obs", CELL - PAD * 2, CELL - PAD * 2, CELL * 0.5)
                     box.reparentTo(parent)
                     box.setPos(x, y, CELL * 0.25)
-                    box.setColor(_CLR_OBSTACLE)
+                    box.setColor(self._pal["obstacle"])
                 else:
                     # Flat tile on the ground
                     np = parent.attachNewNode(floor_cm.generate())
                     np.setP(-90)   # rotate card to face +Z (up)
                     np.setPos(x, y, 0)
                     if cell == CellType.STATION:
-                        np.setColor(_CLR_STATION)
+                        np.setColor(self._pal["station"])
                     elif cell == CellType.POD_HOME:
-                        np.setColor(_CLR_POD_HOME)
+                        np.setColor(self._pal["pod_home"])
                     else:
-                        np.setColor(_CLR_FREE)
+                        np.setColor(self._pal["free"])
 
     def _draw_grid_lines(self, parent, rows, cols):
         """Draw thin grid lines on the XY ground plane (Z=0.01)."""
         ls = LineSegs("grid_lines")
-        ls.setColor(0.25, 0.25, 0.40, 0.4)
+        ls.setColor(*self._pal["grid_line"])
         ls.setThickness(1.0)
 
         min_x = -CELL / 2
@@ -619,7 +639,7 @@ class Panda3DVisualizer(BaseVisualizer):
         dr = self._app.win.makeDisplayRegion(0, 0.18, 0, 0.24)
         dr.setSort(20)
         dr.setClearColorActive(True)
-        dr.setClearColor(LVecBase4f(0.06, 0.06, 0.10, 1))
+        dr.setClearColor(self._pal["gizmo_bg"])
         dr.setClearDepthActive(True)
 
         # Gizmo camera — create manually (not via makeCamera)

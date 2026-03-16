@@ -69,6 +69,7 @@ class SimulationParams:
     tick_delay: float = 0.0           # Seconds to sleep between ticks (0 = no delay)
     p3d_view_mode: str = "2d"         # Panda3D camera: "2d" (ortho) or "3d" (perspective)
     p3d_use_gpu: bool = False         # Enable GPU batching/instancing in Panda3D
+    night_mode: bool = True           # True = dark theme, False = light/white theme
     log_level: str = "INFO"
     log_file: Optional[str] = None
 
@@ -143,6 +144,7 @@ def load_config(path: str) -> SimulationConfig:
         tick_delay=sim_raw.get("tick_delay", 0.0),
         p3d_view_mode=sim_raw.get("p3d_view_mode", "2d"),
         p3d_use_gpu=sim_raw.get("p3d_use_gpu", False),
+        night_mode=sim_raw.get("night_mode", True),
         log_level=sim_raw.get("log_level", "INFO"),
         log_file=sim_raw.get("log_file", None),
     )

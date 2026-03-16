@@ -30,12 +30,20 @@ class GreedyTaskAssigner(BaseTaskAssigner):
         new_tasks = []
         pending_orders = world_state.order_state.get_pending_orders()
 
+        # Build set of pods already reserved by an active task
+        # (prevents sending two robots to pick up the same pod)
+        reserved_pods = {
+            t.pod_id
+            for t in world_state.task_state.tasks.values()
+            if t.status in (TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS)
+        }
+
         for order in pending_orders:
             all_assigned = True
 
             for pod_id in order.pod_ids:
                 pod = world_state.pod_state.get_pod(pod_id)
-                if pod is None or pod.is_carried:
+                if pod is None or pod.is_carried or pod_id in reserved_pods:
                     continue
 
                 # Find nearest idle agent
@@ -103,6 +111,7 @@ class GreedyTaskAssigner(BaseTaskAssigner):
                 world_state.task_state.add_task(return_task)
 
                 new_tasks.extend([pick_task, deliver_task, return_task])
+                reserved_pods.add(pod_id)
 
                 # Mark agent as busy
                 agent.status = AgentStatus.MOVING_TO_POD

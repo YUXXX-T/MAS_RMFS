@@ -87,12 +87,15 @@ def main():
 
     # --- Optional visualizer ---
     if args.mpl:
-        visualizer = MatplotlibVisualizer()
+        visualizer = MatplotlibVisualizer(
+            night_mode=config.simulation.night_mode,
+        )
     elif args.p3d:
         from Visualization.panda3d_visualizer import Panda3DVisualizer
         visualizer = Panda3DVisualizer(
             view_mode=config.simulation.p3d_view_mode,
             use_gpu=config.simulation.p3d_use_gpu,
+            night_mode=config.simulation.night_mode,
         )
     elif args.visualize:
         visualizer = TerminalVisualizer()

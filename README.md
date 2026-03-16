@@ -438,6 +438,19 @@ list_policies(category=None)     # 列出已注册的算法
 
 渲染端未来可以换成 任何引擎（Panda3D、Godot、甚至 C++ 自定义），只要它能读 ZeroMQ 消息。
 ```
+Inventory model and Inventory lookup policy
+```
+current:
+Pod = 1 atomic unit — each Pod only has a pod_id, a home_position, and a current_position. There's no concept of SKU, product type, or inventory inside a pod.
+Order = a list of pod IDs — an Order directly says "bring Pod #3 and Pod #7 to Station 1". There's no "I need product X" → "which pod has product X?" lookup.
+
+multi-product:
+Add an inventory model — each pod stores a dict[str, int] mapping SKU → quantity
+Change orders to reference SKU names instead of pod IDs
+Add an inventory lookup policy that decides which pod to fetch for a given SKU (e.g., nearest pod containing that SKU)
+```
+
+
 
 ### 🎬 DEMO (Current)
 🔷 Simulation in 3D:

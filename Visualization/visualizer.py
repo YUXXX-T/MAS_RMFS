@@ -105,7 +105,7 @@ class MatplotlibVisualizer(BaseVisualizer):
         "MOVING": 5,
     }
 
-    def __init__(self):
+    def __init__(self, night_mode: bool = True):
         import matplotlib
         matplotlib.use("TkAgg")          # ensure interactive backend
         import matplotlib.pyplot as plt
@@ -115,6 +115,33 @@ class MatplotlibVisualizer(BaseVisualizer):
         self._fig = None
         self._axes = None
         self._initialised = False
+        self._night_mode = night_mode
+
+        # Theme colours
+        if night_mode:
+            self._bg = "#0f0f1a"
+            self._ax_bg = "#16162a"
+            self._tick_clr = "#aaaaaa"
+            self._spine_clr = "#333355"
+            self._title_clr = "#e0e0e0"
+            self._grid_base = [0.09, 0.09, 0.16]
+            self._grid_obs = [0.25, 0.25, 0.30]
+            self._grid_pod_home = [0.10, 0.18, 0.20]
+            self._grid_line_clr = "#333355"
+            self._label_bg = "#16162a"
+            self._idle_clr = "#1a1a2e"
+        else:
+            self._bg = "#f5f5f8"
+            self._ax_bg = "#ffffff"
+            self._tick_clr = "#333333"
+            self._spine_clr = "#bbbbcc"
+            self._title_clr = "#222222"
+            self._grid_base = [0.92, 0.92, 0.95]
+            self._grid_obs = [0.60, 0.60, 0.65]
+            self._grid_pod_home = [0.80, 0.90, 0.92]
+            self._grid_line_clr = "#bbbbcc"
+            self._label_bg = "#ffffff"
+            self._idle_clr = "#dddde8"
 
         # Cumulative data stored across ticks
         self._density: np.ndarray | None = None     # (rows, cols) float
@@ -127,12 +154,12 @@ class MatplotlibVisualizer(BaseVisualizer):
         # Custom discrete colour-map for the timeline panel
         # Order: IDLE, MOVING_TO_POD, CARRYING, DELIVERING, RETURNING, MOVING
         self._timeline_cmap = ListedColormap(
-            ["#1a1a2e",   # IDLE        – near-black
-             "#4361ee",   # MOVING_TO_POD – blue
-             "#f0a500",   # CARRYING    – gold
-             "#e07c24",   # DELIVERING  – orange
-             "#7b2cbf",   # RETURNING   – purple
-             "#2ec4b6"]   # MOVING      – teal
+            [self._idle_clr,  # IDLE
+             "#4361ee",       # MOVING_TO_POD – blue
+             "#f0a500",       # CARRYING    – gold
+             "#e07c24",       # DELIVERING  – orange
+             "#7b2cbf",       # RETURNING   – purple
+             "#2ec4b6"]       # MOVING      – teal
         )
         self._timeline_labels = list(self._STATUS_CODES.keys())
 
@@ -159,7 +186,7 @@ class MatplotlibVisualizer(BaseVisualizer):
 
         self._fig.suptitle(
             f"MAS-RMFS  ·  Tick {world_state.tick}",
-            fontsize=14, fontweight="bold", color="#e0e0e0",
+            fontsize=14, fontweight="bold", color=self._title_clr,
         )
         self._fig.canvas.draw_idle()
         self._fig.canvas.flush_events()
@@ -172,13 +199,13 @@ class MatplotlibVisualizer(BaseVisualizer):
         plt.ion()
         self._fig, self._axes = plt.subplots(
             2, 2, figsize=(14, 10),
-            facecolor="#0f0f1a",
+            facecolor=self._bg,
         )
         for ax in self._axes.flat:
-            ax.set_facecolor("#16162a")
-            ax.tick_params(colors="#aaaaaa", labelsize=8)
+            ax.set_facecolor(self._ax_bg)
+            ax.tick_params(colors=self._tick_clr, labelsize=8)
             for spine in ax.spines.values():
-                spine.set_color("#333355")
+                spine.set_color(self._spine_clr)
 
         rows = world_state.map_state.rows
         cols = world_state.map_state.cols
@@ -212,23 +239,23 @@ class MatplotlibVisualizer(BaseVisualizer):
         rows, cols = ms.rows, ms.cols
 
         # Background cell colour matrix
-        grid = np.ones((rows, cols, 3)) * np.array([0.09, 0.09, 0.16])
+        grid = np.ones((rows, cols, 3)) * np.array(self._grid_base)
 
         for r in range(rows):
             for c in range(cols):
                 cell = ms.grid[r][c]
                 if cell == CellType.OBSTACLE:
-                    grid[r, c] = [0.25, 0.25, 0.30]
+                    grid[r, c] = self._grid_obs
                 elif cell == CellType.POD_HOME:
-                    grid[r, c] = [0.10, 0.18, 0.20]
+                    grid[r, c] = self._grid_pod_home
 
         ax.imshow(grid, origin="upper", aspect="equal")
 
         # Grid lines
         for i in range(rows + 1):
-            ax.axhline(i - 0.5, color="#333355", linewidth=0.5)
+            ax.axhline(i - 0.5, color=self._grid_line_clr, linewidth=0.5)
         for j in range(cols + 1):
-            ax.axvline(j - 0.5, color="#333355", linewidth=0.5)
+            ax.axvline(j - 0.5, color=self._grid_line_clr, linewidth=0.5)
 
         # Stations (★)
         for sid, (sr, sc) in ms.station_positions.items():
@@ -265,7 +292,7 @@ class MatplotlibVisualizer(BaseVisualizer):
         ax.set_ylim(rows - 0.5, -0.5)
         ax.set_xticks(range(cols))
         ax.set_yticks(range(rows))
-        ax.set_title("Warehouse Grid", color="#e0e0e0", fontsize=11, pad=8)
+        ax.set_title("Warehouse Grid", color=self._title_clr, fontsize=11, pad=8)
 
     def _draw_density(self, ax, world_state):
         """Top-right: cumulative path density heatmap."""
@@ -276,13 +303,13 @@ class MatplotlibVisualizer(BaseVisualizer):
         rows, cols = self._density.shape
         ax.set_xticks(range(cols))
         ax.set_yticks(range(rows))
-        ax.set_title("Path Density (cumulative)", color="#e0e0e0",
+        ax.set_title("Path Density (cumulative)", color=self._title_clr,
                       fontsize=11, pad=8)
 
         # Lightweight colour-bar (recreate on first call, update value range)
         if not hasattr(self, "_density_cb"):
             self._density_cb = self._fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-            self._density_cb.ax.tick_params(colors="#aaaaaa", labelsize=7)
+            self._density_cb.ax.tick_params(colors=self._tick_clr, labelsize=7)
         else:
             self._density_cb.update_normal(im)
 
@@ -308,8 +335,8 @@ class MatplotlibVisualizer(BaseVisualizer):
 
         ax.set_yticks(range(n_agents))
         ax.set_yticklabels([f"R{i}" for i in range(n_agents)])
-        ax.set_xlabel("Tick", color="#aaaaaa", fontsize=9)
-        ax.set_title("Agent Status Timeline", color="#e0e0e0",
+        ax.set_xlabel("Tick", color=self._tick_clr, fontsize=9)
+        ax.set_title("Agent Status Timeline", color=self._title_clr,
                       fontsize=11, pad=8)
 
         # Legend (status labels)
@@ -321,8 +348,8 @@ class MatplotlibVisualizer(BaseVisualizer):
             ]
             ax.legend(
                 handles=patches, loc="lower left", fontsize=6,
-                ncol=3, framealpha=0.6, facecolor="#16162a",
-                edgecolor="#333355", labelcolor="#cccccc",
+                ncol=3, framealpha=0.6, facecolor=self._label_bg,
+                edgecolor=self._spine_clr, labelcolor=self._tick_clr,
             )
             self._timeline_legend_drawn = True
 
@@ -341,10 +368,10 @@ class MatplotlibVisualizer(BaseVisualizer):
             f"Completed: {current}\nRate: {rate:.2f} orders/tick",
             transform=ax.transAxes, ha="right", va="top",
             fontsize=9, color="#2ecc71", fontfamily="monospace",
-            bbox=dict(boxstyle="round,pad=0.4", facecolor="#16162a",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor=self._ax_bg,
                       edgecolor="#2ecc71", alpha=0.8),
         )
 
-        ax.set_xlabel("Tick", color="#aaaaaa", fontsize=9)
-        ax.set_ylabel("Completed Orders", color="#aaaaaa", fontsize=9)
-        ax.set_title("Throughput", color="#e0e0e0", fontsize=11, pad=8)
+        ax.set_xlabel("Tick", color=self._tick_clr, fontsize=9)
+        ax.set_ylabel("Completed Orders", color=self._tick_clr, fontsize=9)
+        ax.set_title("Throughput", color=self._title_clr, fontsize=11, pad=8)
