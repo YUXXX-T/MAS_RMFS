@@ -305,18 +305,9 @@ class SimulationUI(QMainWindow):
         self.setWindowTitle("MAS-RMFS  \u2014  Simulation")
         self.resize(1400, 900)
 
-        # 外层垂直分割器：上 = 主区域，下 = 图表
-        self._outer_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.setCentralWidget(self._outer_splitter)
-
-        # ── 顶部区域（控件 + Panda3D） ──
-        top_widget = QWidget()
-        top_layout = QHBoxLayout(top_widget)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(0)
-
+        # 水平分割器：左 = 控件，右 = Panda3D
         inner_splitter = QSplitter(Qt.Orientation.Horizontal)
-        top_layout.addWidget(inner_splitter)
+        self.setCentralWidget(inner_splitter)
 
         # 左侧面板（控件）
         left_widget = QWidget()
@@ -430,28 +421,33 @@ class SimulationUI(QMainWindow):
 
         inner_splitter.addWidget(left_widget)
 
-        # 右侧面板（Panda3D 容器）
+        # 右侧面板：垂直分割器（Panda3D + 图表）
+        self._right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._right_splitter.setMinimumSize(600, 400)
+
+        # Panda3D 容器
         self._panda_container = QWidget()
-        self._panda_container.setMinimumSize(600, 400)
         self._panda_container.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        inner_splitter.addWidget(self._panda_container)
+        self._right_splitter.addWidget(self._panda_container)
+
+        # 嵌入式图表面板（默认隐藏）
+        self._charts_panel = self._build_charts_panel()
+        self._charts_panel.setVisible(False)
+        self._right_splitter.addWidget(self._charts_panel)
+        self._right_splitter.setStretchFactor(0, 3)
+        self._right_splitter.setStretchFactor(1, 1)
+        # 图表显示/隐藏时重新调整 Panda3D 大小
+        self._right_splitter.splitterMoved.connect(lambda *_: self._resize_panda())
+
+        inner_splitter.addWidget(self._right_splitter)
         inner_splitter.setStretchFactor(0, 0)
         inner_splitter.setStretchFactor(1, 1)
         inner_splitter.setSizes([340, 1060])
 
-        self._outer_splitter.addWidget(top_widget)
-
-        # ── 底部区域：matplotlib 图表面板（默认隐藏） ──
-        self._charts_widget = self._build_charts_widget()
-        self._charts_widget.setVisible(False)
-        self._outer_splitter.addWidget(self._charts_widget)
-        self._outer_splitter.setStretchFactor(0, 3)
-        self._outer_splitter.setStretchFactor(1, 1)
-
-    def _build_charts_widget(self):
-        """创建包含 3 个子图的 matplotlib 图表面板。"""
+    def _build_charts_panel(self):
+        """创建嵌入式 matplotlib 图表面板。"""
         nm = self._night_mode
         bg = "#0f0f1a" if nm else "#f5f5f8"
         ax_bg = "#16162a" if nm else "#ffffff"
@@ -470,6 +466,10 @@ class SimulationUI(QMainWindow):
             "#2ec4b6",     # MOVING
         ])
 
+        panel = QWidget()
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(2, 2, 2, 2)
+
         fig = plt.figure(figsize=(14, 3.5), facecolor=bg)
         self._chart_fig = fig
         axes = fig.subplots(1, 3)
@@ -480,9 +480,10 @@ class SimulationUI(QMainWindow):
             for sp in ax.spines.values():
                 sp.set_color(self._chart_spine_clr)
 
-        canvas = FigureCanvasQTAgg(fig)
-        canvas.setMinimumHeight(200)
-        return canvas
+        self._charts_canvas = FigureCanvasQTAgg(fig)
+        self._charts_canvas.setMinimumHeight(150)
+        panel_layout.addWidget(self._charts_canvas)
+        return panel
 
     # ── 图表绘制 ─────────────────────────────────────────────────
 
@@ -514,7 +515,7 @@ class SimulationUI(QMainWindow):
         self._draw_throughput(self._chart_axes[2], world_state)
 
         self._chart_fig.tight_layout(pad=1.5)
-        self._charts_widget.draw_idle()
+        self._charts_canvas.draw_idle()
 
     def _draw_timeline(self, ax, world_state):
         if not self._status_history:
@@ -697,7 +698,7 @@ class SimulationUI(QMainWindow):
 
     def _toggle_charts(self):
         self._chart_visible = not self._chart_visible
-        self._charts_widget.setVisible(self._chart_visible)
+        self._charts_panel.setVisible(self._chart_visible)
         if self._chart_visible:
             self._chart_btn.setText("\U0001f4ca  Hide Charts")
             # 立即用当前数据重绘
@@ -705,6 +706,8 @@ class SimulationUI(QMainWindow):
                 self._redraw_charts(self._engine.world)
         else:
             self._chart_btn.setText("\U0001f4ca  Show Charts")
+        # 图表显示/隐藏后重新调整 Panda3D 大小
+        QTimer.singleShot(50, self._resize_panda)
 
     # ── 键盘快捷键 ────────────────────────────────────────────
 
