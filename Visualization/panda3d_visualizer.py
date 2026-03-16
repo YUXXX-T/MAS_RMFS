@@ -33,6 +33,7 @@ from panda3d.core import (
     NodePath,
     LineSegs,
     LPoint3f,
+    RigidBodyCombiner,
 )
 
 if TYPE_CHECKING:
@@ -126,8 +127,9 @@ class Panda3DVisualizer(BaseVisualizer):
         ``"3d"`` for isometric perspective with mouse orbit.
     """
 
-    def __init__(self, view_mode: str = "2d"):
+    def __init__(self, view_mode: str = "2d", use_gpu: bool = False):
         self._view_mode = view_mode.lower()
+        self._use_gpu = use_gpu
         self._app: ShowBase | None = None
         self._initialised = False
 
@@ -232,7 +234,12 @@ class Panda3DVisualizer(BaseVisualizer):
             self._app.cam.lookAt(cx, 0, cz_2d)
 
         # ---- Static grid cells ----
-        static_root = self._app.render.attachNewNode("static_grid")
+        if self._use_gpu:
+            # Use RigidBodyCombiner to batch static tiles into one draw call
+            rbc = RigidBodyCombiner("static_grid")
+            static_root = self._app.render.attachNewNode(rbc)
+        else:
+            static_root = self._app.render.attachNewNode("static_grid")
 
         if is_3d:
             self._build_grid_3d(static_root, ms, rows, cols)
@@ -261,22 +268,44 @@ class Panda3DVisualizer(BaseVisualizer):
         if is_3d:
             self._draw_grid_lines(static_root, rows, cols)
 
+        # GPU: batch static geometry
+        if self._use_gpu:
+            rbc.collect()
+            static_root.flattenStrong()
+
         # ---- Pod nodes (dynamic) ----
         pod_root = self._app.render.attachNewNode("pods")
+        # GPU: create one template and instance it
+        if self._use_gpu and is_3d:
+            pod_template = _make_box("pod_tpl", CELL * 0.6, CELL * 0.6, CELL * 0.35)
+            pod_template.setColor(_CLR_POD)
+            pod_template.setTransparency(TransparencyAttrib.MAlpha)
+            pod_template.flattenStrong()
+        else:
+            pod_template = None
+
         for pod in world_state.pod_state.pods.values():
             pr, pc = pod.current_position
             if is_3d:
-                np = _make_box("pod", CELL * 0.6, CELL * 0.6, CELL * 0.35)
-                np.reparentTo(pod_root)
-                np.setPos(pc * CELL, -pr * CELL, CELL * 0.175)
+                if pod_template is not None:
+                    # Instance the template
+                    np = pod_root.attachNewNode(f"pod_{pod.pod_id}")
+                    pod_template.instanceTo(np)
+                    np.setPos(pc * CELL, -pr * CELL, CELL * 0.175)
+                else:
+                    np = _make_box("pod", CELL * 0.6, CELL * 0.6, CELL * 0.35)
+                    np.reparentTo(pod_root)
+                    np.setPos(pc * CELL, -pr * CELL, CELL * 0.175)
+                    np.setColor(_CLR_POD)
+                    np.setTransparency(TransparencyAttrib.MAlpha)
             else:
                 pod_cm = CardMaker("pod")
                 s = CELL * 0.35
                 pod_cm.setFrame(-s, s, -s, s)
                 np = pod_root.attachNewNode(pod_cm.generate())
                 np.setPos(pc * CELL, -0.2, -pr * CELL)
-            np.setColor(_CLR_POD)
-            np.setTransparency(TransparencyAttrib.MAlpha)
+                np.setColor(_CLR_POD)
+                np.setTransparency(TransparencyAttrib.MAlpha)
             self._pod_nodes[pod.pod_id] = np
 
         # ---- Agent nodes (dynamic) ----

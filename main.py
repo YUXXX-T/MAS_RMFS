@@ -92,6 +92,7 @@ def main():
         from Visualization.panda3d_visualizer import Panda3DVisualizer
         visualizer = Panda3DVisualizer(
             view_mode=config.simulation.p3d_view_mode,
+            use_gpu=config.simulation.p3d_use_gpu,
         )
     elif args.visualize:
         visualizer = TerminalVisualizer()

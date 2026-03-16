@@ -73,6 +73,7 @@
         "station_process_duration": 5,
         "tick_delay": 0.5,
         "p3d_view_mode": "3d",
+        "p3d_use_gpu": false,
         "log_level": "INFO",
         "log_file": null
     },
