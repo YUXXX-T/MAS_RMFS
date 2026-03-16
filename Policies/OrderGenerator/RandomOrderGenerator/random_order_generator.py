@@ -1,5 +1,5 @@
 """
-Order Generator Module
+Random Order Generator
 ======================
 Default implementation: generates random orders at a configurable interval.
 """
@@ -7,7 +7,7 @@ Default implementation: generates random orders at a configurable interval.
 import random
 from typing import List
 
-from Policies.base_policy import BaseOrderGenerator
+from Policies.OrderGenerator.base_order_generator import BaseOrderGenerator
 from WorldState.order_state import Order
 
 

@@ -16,9 +16,8 @@ import sys
 
 from Config.config_loader import load_config, SimulationConfig
 from Engine.simulation_engine import SimulationEngine
-from Policies.order_generator import RandomOrderGenerator
-from Policies.task_assigner import GreedyTaskAssigner
-from Policies.path_planner import AStarPathPlanner
+import Policies  # noqa: F401  — triggers algorithm self-registration
+from Policies.policy_registry import get_policy
 from Visualization.visualizer import TerminalVisualizer, MatplotlibVisualizer
 from Debug.logger import SimLogger
 
@@ -53,13 +52,26 @@ def main():
     logger.info(f"Loading config from: {args.config}")
     config = load_config(args.config)
 
-    # --- Instantiate policies ---
-    order_generator = RandomOrderGenerator(
+    # --- Instantiate policies from config ---
+    og_name, og_params = config.policies.order_generator
+    ta_name, ta_params = config.policies.task_assigner
+    pp_name, pp_params = config.policies.path_planner
+
+    OrderGeneratorCls = get_policy("order_generator", og_name)
+    TaskAssignerCls = get_policy("task_assigner", ta_name)
+    PathPlannerCls = get_policy("path_planner", pp_name)
+
+    logger.info(f"Policies: order_generator={og_name}, "
+                f"task_assigner={ta_name}, "
+                f"path_planner={pp_name}")
+
+    order_generator = OrderGeneratorCls(
         order_interval=config.simulation.order_interval,
         max_items_per_order=config.simulation.max_items_per_order,
+        **og_params,
     )
-    task_assigner = GreedyTaskAssigner()
-    path_planner = AStarPathPlanner()
+    task_assigner = TaskAssignerCls(**ta_params)
+    path_planner = PathPlannerCls(**pp_params)
 
     # --- Optional visualizer ---
     if args.mpl:

@@ -38,6 +38,9 @@ class AgentState:
         Planned path (sequence of cells to traverse). Empty if idle.
     path_index : int
         Current index into the path list.
+    wait_ticks : int
+        Number of ticks remaining before the current action completes.
+        While > 0 the agent cannot move or accept new tasks.
     """
 
     def __init__(self, agent_id: int, start_position: Tuple[int, int]):
@@ -48,11 +51,17 @@ class AgentState:
         self.carried_pod_id: Optional[int] = None
         self.path: List[Tuple[int, int]] = []
         self.path_index: int = 0
+        self.wait_ticks: int = 0
 
     @property
     def is_idle(self) -> bool:
         """Check if agent is available for new tasks."""
         return self.status == AgentStatus.IDLE
+
+    @property
+    def is_waiting(self) -> bool:
+        """Check if agent is waiting for an action to complete."""
+        return self.wait_ticks > 0
 
     @property
     def has_path(self) -> bool:

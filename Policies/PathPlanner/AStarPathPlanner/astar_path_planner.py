@@ -1,13 +1,13 @@
 """
-Path Planner Module
-===================
+A* Path Planner
+================
 Default implementation: A* pathfinding on the warehouse grid.
 """
 
 import heapq
 from typing import List, Tuple
 
-from Policies.base_policy import BasePathPlanner
+from Policies.PathPlanner.base_path_planner import BasePathPlanner
 
 
 def _manhattan_distance(a: Tuple[int, int], b: Tuple[int, int]) -> int:

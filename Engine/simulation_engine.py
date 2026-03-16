@@ -14,7 +14,9 @@ from WorldState.world import WorldState
 from WorldState.agent_state import AgentStatus
 from WorldState.task_state import TaskType, TaskStatus
 from WorldState.order_state import OrderStatus
-from Policies.base_policy import BaseOrderGenerator, BaseTaskAssigner, BasePathPlanner
+from Policies.OrderGenerator import BaseOrderGenerator
+from Policies.TaskAssigner import BaseTaskAssigner
+from Policies.PathPlanner import BasePathPlanner
 from Debug.logger import SimLogger
 
 
@@ -119,11 +121,12 @@ class SimulationEngine:
         # --- Step 3: Plan paths & activate tasks ---
         self._plan_and_activate(tick)
 
-        # --- Step 4: Move agents ---
+        # --- Step 4: Capture pre-move positions & Move agents ---
+        prev_positions = {agent.agent_id: agent.position for agent in self.world.agents}
         self._move_agents(tick)
 
-        # --- Step 5: Detect conflicts (two agents on same cell) ---
-        self._detect_conflicts(tick)
+        # --- Step 5: Detect conflicts (vertex & oncoming/swap) ---
+        self._detect_conflicts(tick, prev_positions)
 
         # --- Step 6: Handle pickups, deliveries, returns ---
         self._handle_actions(tick)
@@ -141,7 +144,7 @@ class SimulationEngine:
     def _plan_and_activate(self, tick: int):
         """Plan paths for agents that have assigned tasks but no active path."""
         for agent in self.world.agents:
-            if agent.is_idle:
+            if agent.is_idle or agent.is_waiting:
                 continue
 
             # If agent has no path and no active task, find next assigned task
@@ -184,6 +187,8 @@ class SimulationEngine:
     def _move_agents(self, tick: int):
         """Move each agent one step along their path."""
         for agent in self.world.agents:
+            if agent.is_waiting:
+                continue  # Frozen while performing an action
             if agent.has_path:
                 new_pos = agent.advance()
                 if new_pos:
@@ -196,8 +201,17 @@ class SimulationEngine:
                         f"[Tick {tick}] Agent #{agent.agent_id} moved to {new_pos}"
                     )
 
-    def _detect_conflicts(self, tick: int):
-        """Detect and warn when two or more agents occupy the same cell."""
+    def _detect_conflicts(self, tick: int, prev_positions: dict):
+        """Detect vertex conflicts and oncoming (head-on swap) conflicts.
+
+        Parameters
+        ----------
+        tick : int
+            Current simulation tick.
+        prev_positions : dict[int, tuple[int, int]]
+            Mapping of agent_id -> position *before* this tick's movement.
+        """
+        # --- Vertex conflicts: two agents on the same cell ---
         pos_to_agents: dict[tuple, list] = {}
         for agent in self.world.agents:
             pos_to_agents.setdefault(agent.position, []).append(agent.agent_id)
@@ -210,22 +224,73 @@ class SimulationEngine:
                     f"occupy the same cell {pos}"
                 )
 
+        # --- Oncoming (head-on / swap) conflicts ---
+        # Two agents swap positions: A was at X and moved to Y while
+        # B was at Y and moved to X.  This means they crossed the same
+        # edge in opposite directions during this tick.
+        agents = self.world.agents
+        for i in range(len(agents)):
+            for j in range(i + 1, len(agents)):
+                a, b = agents[i], agents[j]
+                a_prev = prev_positions[a.agent_id]
+                b_prev = prev_positions[b.agent_id]
+                # Check if they swapped (and actually moved)
+                if (
+                    a.position == b_prev
+                    and b.position == a_prev
+                    and a_prev != a.position  # A actually moved
+                ):
+                    self.logger.warning(
+                        f"[Tick {tick}] ONCOMING CONFLICT: "
+                        f"Agent #{a.agent_id} ({a_prev}->{a.position}) and "
+                        f"Agent #{b.agent_id} ({b_prev}->{b.position}) "
+                        f"swapped positions (head-on collision)"
+                    )
+
     def _handle_actions(self, tick: int):
-        """Handle pickup, delivery, and return actions when agents reach destinations."""
+        """Handle pickup, delivery, and return actions with configurable delays."""
+        sim = self.config.simulation
+
         for agent in self.world.agents:
             active_task = self.world.task_state.get_active_task_for_agent(agent.agent_id)
             if active_task is None:
                 continue
 
-            # Check if agent has reached the destination
-            if agent.position != active_task.destination:
-                continue
-            if agent.has_path:
-                continue  # Still has steps remaining
+            # --- Countdown in progress: decrement and skip ---
+            if agent.is_waiting:
+                agent.wait_ticks -= 1
+                if agent.wait_ticks > 0:
+                    continue
+                # Countdown just finished — fall through to perform the action
+            else:
+                # --- Not waiting: check if agent just arrived ---
+                if agent.position != active_task.destination:
+                    continue
+                if agent.has_path:
+                    continue  # Still moving
 
-            # Agent has reached the task destination
+                # --- Determine required wait duration ---
+                if active_task.task_type == TaskType.PICK:
+                    required_wait = sim.pickup_duration
+                elif active_task.task_type == TaskType.DELIVER:
+                    required_wait = sim.station_process_duration
+                elif active_task.task_type == TaskType.RETURN:
+                    required_wait = sim.dropoff_duration
+                else:
+                    required_wait = 0
+
+                # --- Start countdown ---
+                if required_wait > 0:
+                    agent.wait_ticks = required_wait
+                    self.logger.info(
+                        f"[Tick {tick}] Agent #{agent.agent_id} waiting "
+                        f"{required_wait} ticks for {active_task.task_type.name} "
+                        f"at {agent.position}"
+                    )
+                    continue  # Come back next tick
+
+            # --- Perform the action ---
             if active_task.task_type == TaskType.PICK:
-                # Pick up the pod
                 pod = self.world.pod_state.get_pod(active_task.pod_id)
                 if pod:
                     pod.pick_up(agent.agent_id)
@@ -238,14 +303,12 @@ class SimulationEngine:
                 agent.clear_path()
 
             elif active_task.task_type == TaskType.DELIVER:
-                # Deliver pod at station
                 pod = self.world.pod_state.get_pod(active_task.pod_id)
                 if pod:
                     self.logger.info(
                         f"[Tick {tick}] Agent #{agent.agent_id} delivered "
                         f"Pod #{pod.pod_id} to station at {agent.position}"
                     )
-                    # Mark pod as delivered for the order
                     order = self.world.order_state.orders.get(active_task.order_id)
                     if order:
                         order.mark_pod_delivered(active_task.pod_id)
@@ -254,7 +317,6 @@ class SimulationEngine:
                 agent.clear_path()
 
             elif active_task.task_type == TaskType.RETURN:
-                # Return pod to its home
                 pod = self.world.pod_state.get_pod(active_task.pod_id)
                 if pod:
                     pod.put_down(pod.home_position)

@@ -1,12 +1,12 @@
 """
-Task Assigner Module
+Greedy Task Assigner
 ====================
 Default implementation: greedy assignment of orders to nearest idle robots.
 """
 
 from typing import List, Tuple
 
-from Policies.base_policy import BaseTaskAssigner
+from Policies.TaskAssigner.base_task_assigner import BaseTaskAssigner
 from WorldState.task_state import Task, TaskType, TaskStatus
 from WorldState.order_state import OrderStatus
 from WorldState.agent_state import AgentStatus
