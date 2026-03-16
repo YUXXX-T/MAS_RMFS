@@ -25,7 +25,7 @@ class ZipfOrderGenerator(BaseOrderGenerator):
     exponentially more often than higher-ranked ones, controlled
     by the ``zipf_param`` exponent.
 
-    Parameters
+    参数
     ----------
     order_interval : int
         Generate a new order every N ticks.
@@ -51,7 +51,7 @@ class ZipfOrderGenerator(BaseOrderGenerator):
         """
         Compute Zipf probability weights for *n* items.
 
-        Returns
+        返回值
         -------
         np.ndarray
             Normalised probability array of length *n*.

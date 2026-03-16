@@ -2,6 +2,11 @@
 Config Loader Module
 ====================
 Loads simulation configuration from a JSON file and provides it as typed dataclasses.
+
+配置加载模块
+====================
+从 JSON 文件加载仿真配置，并将其提供为类型化的数据类。
+
 """
 
 import json
@@ -46,11 +51,18 @@ class RobotConfig:
 
 @dataclass
 class PolicyConfig:
-    """Configuration for which algorithm to use for each policy.
+    """
+    Configuration for which algorithm to use for each policy.
 
     Each field stores a (name, params) tuple.  In JSON the value can be
     either a plain string (name only, no extra params) or an object
     ``{"name": "...", "params": {...}}``.
+
+    用于指定各策略所使用算法的配置。 
+
+    每个字段均存储一个 (name, params) 元组。在 JSON 格式中，其取值可以是
+    一个纯字符串（仅包含名称，无额外参数），也可以是一个对象
+    ``{"name": "...", "params": {...}}``。
     """
     order_generator: Tuple[str, Dict[str, Any]] = ("RandomOrderGenerator", {})
     task_assigner: Tuple[str, Dict[str, Any]] = ("GreedyTaskAssigner", {})
@@ -60,7 +72,7 @@ class PolicyConfig:
 
 @dataclass
 class SimulationParams:
-    """Simulation-level parameters."""
+    """仿真级参数。"""
     order_interval: int = 5           # Generate new order every N ticks
     max_items_per_order: int = 2      # Max pods per order
     pickup_duration: int = 2          # Ticks to pause when picking up a pod
@@ -87,12 +99,12 @@ def load_config(path: str) -> SimulationConfig:
     """
     Load a SimulationConfig from a JSON file.
 
-    Parameters
+    参数
     ----------
     path : str
-        Path to the JSON configuration file.
+        JSON 配置文件路径。
 
-    Returns
+    返回值
     -------
     SimulationConfig
         Parsed and validated configuration.

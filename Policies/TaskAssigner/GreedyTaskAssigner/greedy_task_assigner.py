@@ -1,7 +1,13 @@
 """
+
 Greedy Task Assigner
 ====================
 Default implementation: greedy assignment of orders to nearest idle robots.
+
+贪婪任务分配器
+====================
+默认实现：将订单贪婪地分配给距离最近的空闲机器人。
+
 """
 
 from typing import List, Tuple
@@ -23,10 +29,18 @@ class GreedyTaskAssigner(BaseTaskAssigner):
 
     For each pending order, assigns each pod to the nearest idle robot.
     Creates a chain of tasks: PICK → DELIVER → RETURN for each pod.
+
+    贪婪任务分配器
+    ====================
+    对于每一个待处理订单，将对应的货架分配给距离最近的空闲机器人。 
+    为每个货架创建一条任务链：拣货 → 配送 → 归位。
     """
 
     def assign(self, world_state) -> List[Task]:
-        """Assign pending orders to idle agents greedily by distance."""
+        """
+        Assign pending orders to idle agents greedily by distance.
+        按距离贪婪地将待处理订单分配给空闲坐席。
+        """
         new_tasks = []
         pending_orders = world_state.order_state.get_pending_orders()
 

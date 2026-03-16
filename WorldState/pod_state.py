@@ -11,7 +11,7 @@ class Pod:
     """
     A single pod (shelf unit) in the warehouse.
 
-    Attributes
+    属性
     ----------
     pod_id : int
         Unique pod identifier.
@@ -57,7 +57,7 @@ class PodState:
     """
     Container managing all pods in the warehouse.
 
-    Attributes
+    属性
     ----------
     pods : dict[int, Pod]
         All pods keyed by pod_id.

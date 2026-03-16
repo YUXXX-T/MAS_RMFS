@@ -22,7 +22,7 @@ class MapState:
     """
     Grid-based warehouse map.
 
-    Attributes
+    属性
     ----------
     rows : int
         Number of rows in the grid.

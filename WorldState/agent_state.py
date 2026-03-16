@@ -22,7 +22,7 @@ class AgentState:
     """
     State of a single robot agent.
 
-    Attributes
+    属性
     ----------
     agent_id : int
         Unique identifier for this agent.
@@ -72,7 +72,7 @@ class AgentState:
         """
         Move the agent one step along its planned path.
 
-        Returns
+        返回值
         -------
         tuple[int, int] or None
             The new position, or None if path is exhausted.

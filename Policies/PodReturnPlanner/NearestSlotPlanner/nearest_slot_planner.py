@@ -1,8 +1,11 @@
 """
 Nearest Slot Return Planner
 ============================
-Returns the pod to the closest available (empty) pod-home slot,
+返回值 the pod to the closest available (empty) pod-home slot,
 minimizing the robot's travel distance after delivery.
+
+将 Pod 返回至距离最近的可用（空闲）Pod 位，
+从而最大程度地缩短机器人完成配送后的移动距离。
 """
 
 from typing import Tuple, TYPE_CHECKING
@@ -26,6 +29,12 @@ class NearestSlotPlanner(BasePodReturnPlanner):
     closest to the workstation that is not currently occupied by
     another pod.  Falls back to the pod's original home if every
     slot is occupied.
+
+    将 Pod 返回至最近的空闲 Pod 归巢槽位。 
+
+    扫描地图上所有的 Pod 归巢位置，并选取其中
+    距离工作站最近且当前未被其他 Pod 占用的槽位。 
+    若所有槽位均已被占用，则回退至该 Pod 的原始归巢位置。
     """
 
     def plan_return(

@@ -19,7 +19,7 @@ class Order:
     """
     A customer order requesting items (pods) to be delivered to a station.
 
-    Attributes
+    属性
     ----------
     order_id : int
         Unique order identifier.
@@ -69,7 +69,7 @@ class OrderState:
     """
     Container managing all orders in the system.
 
-    Attributes
+    属性
     ----------
     orders : dict[int, Order]
         All orders keyed by order_id.

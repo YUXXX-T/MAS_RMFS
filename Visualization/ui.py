@@ -1,17 +1,17 @@
 """
-Qt UI for MAS-RMFS Simulation
+MAS-RMFS 仿真的 Qt 用户界面
 ==============================
-PyQt6 main window that embeds the Panda3D visualiser and provides
-runtime controls (Play / Pause, Stop, Speed slider) plus a toggleable
-charts panel (Agent Status Timeline, Path Density, Throughput).
+PyQt6 主窗口，内嵌 Panda3D 可视化器并提供
+运行时控件（播放/暂停、停止、速度滑块）以及可切换的
+图表面板（智能体状态时间线、路径密度、吞吐量）。
 
-The Panda3D render is embedded inside a QWidget using
-``WindowProperties.setParentWindow()``, giving a single unified window.
+Panda3D 渲染通过以下方式嵌入 QWidget：
+``WindowProperties.setParentWindow()``, 提供单个统一窗口。
 
-Usage (from main.py)::
+用法（from main.py）：：
 
     ui = SimulationUI(engine, visualizer)
-    ui.run()          # enters Qt event loop — replaces engine.run()
+    ui.run()          # 进入 Qt 事件循环 — 替代 engine.run()
 """
 
 import time
@@ -25,7 +25,7 @@ from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont
 
 import matplotlib
-matplotlib.use("QtAgg")          # use Qt backend (not TkAgg)
+matplotlib.use("QtAgg")          # 使用 Qt 后端（非 TkAgg）
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.colors import ListedColormap
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from Visualization.panda3d_visualizer import Panda3DVisualizer
 
 
-# ─── Status codes (same as MatplotlibVisualizer) ─────────────────────
+# ─── 状态编码（与 MatplotlibVisualizer 相同） ─────────────────────
 _STATUS_CODES = {
     "IDLE": 0, "MOVING_TO_POD": 1, "CARRYING": 2,
     "DELIVERING": 3, "RETURNING": 4, "MOVING": 5,
@@ -45,7 +45,7 @@ _STATUS_CODES = {
 _STATUS_LABELS = list(_STATUS_CODES.keys())
 
 
-# ─── Styles ──────────────────────────────────────────────────────────
+# ─── 样式 ──────────────────────────────────────────────────────────
 _DARK_STYLE = """
 QMainWindow, QWidget {
     background-color: #1a1a2e;
@@ -256,6 +256,7 @@ class SimulationUI(QMainWindow):
     """
     Qt main window with embedded Panda3D render, control panel,
     and toggleable matplotlib charts (timeline, density, throughput).
+    包含嵌入式 Panda3D 渲染视图、控制面板，以及可切换的 Matplotlib 图表（时间轴、密度、吞吐量）的 Qt 主窗口。
     """
 
     def __init__(
@@ -270,7 +271,7 @@ class SimulationUI(QMainWindow):
         self._viz = visualizer
         self._night_mode = night_mode
 
-        # Simulation state
+        # 仿真状态
         self._paused = True
         self._stopped = False
         self._tick_delay = engine.config.simulation.tick_delay
@@ -280,7 +281,7 @@ class SimulationUI(QMainWindow):
         self._viz.stopped = self._stopped
         self._viz.tick_delay = self._tick_delay
 
-        # Chart data
+        # 图表数据
         self._density: np.ndarray | None = None
         self._status_history: list[list[int]] = []
         self._throughput: list[int] = []
@@ -291,24 +292,24 @@ class SimulationUI(QMainWindow):
         self._build_ui()
         self.setStyleSheet(_DARK_STYLE if night_mode else _LIGHT_STYLE)
 
-        # Sim timer
+        # 仿真定时器
         self._sim_timer = QTimer(self)
         self._sim_timer.timeout.connect(self._sim_step)
         self._sim_timer.start(16)
 
         self._panda_embedded = False
 
-    # ── UI construction ───────────────────────────────────────────────
+    # ── UI 构建 ───────────────────────────────────────────────
 
     def _build_ui(self):
-        self.setWindowTitle("MAS-RMFS  \u2014  Simulation")
+        self.setWindow标题("MAS-RMFS  \u2014  Simulation")
         self.resize(1400, 900)
 
-        # Outer vertical splitter: top = main area, bottom = charts
+        # 外层垂直分割器：上 = 主区域，下 = 图表
         self._outer_splitter = QSplitter(Qt.Orientation.Vertical)
         self.setCentralWidget(self._outer_splitter)
 
-        # ── Top area (controls + Panda3D) ──
+        # ── 顶部区域（控件 + Panda3D） ──
         top_widget = QWidget()
         top_layout = QHBoxLayout(top_widget)
         top_layout.setContentsMargins(0, 0, 0, 0)
@@ -317,7 +318,7 @@ class SimulationUI(QMainWindow):
         inner_splitter = QSplitter(Qt.Orientation.Horizontal)
         top_layout.addWidget(inner_splitter)
 
-        # Left panel (controls)
+        # 左侧面板（控件）
         left_widget = QWidget()
         left_widget.setMinimumWidth(300)
         left_widget.setMaximumWidth(420)
@@ -325,13 +326,13 @@ class SimulationUI(QMainWindow):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        # Title
+        # 标题
         title = QLabel("\U0001f916 MAS-RMFS")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         layout.addWidget(title)
 
-        # ── Status section ──
+        # ── 状态区域 ──
         status_box = QGroupBox("Simulation")
         status_layout = QVBoxLayout(status_box)
 
@@ -353,7 +354,7 @@ class SimulationUI(QMainWindow):
         status_layout.addLayout(stats_row)
         layout.addWidget(status_box)
 
-        # ── Controls section ──
+        # ── 控件区域 ──
         ctrl_box = QGroupBox("Controls")
         ctrl_layout = QVBoxLayout(ctrl_box)
 
@@ -401,13 +402,13 @@ class SimulationUI(QMainWindow):
         ctrl_layout.addLayout(preset_row)
         layout.addWidget(ctrl_box)
 
-        # ── Charts toggle ──
+        # ── 图表切换 ──
         self._chart_btn = QPushButton("\U0001f4ca  Show Charts")
         self._chart_btn.setObjectName("chartBtn")
         self._chart_btn.clicked.connect(self._toggle_charts)
         layout.addWidget(self._chart_btn)
 
-        # ── Info section ──
+        # ── 信息区域 ──
         info_box = QGroupBox("Info")
         info_layout = QVBoxLayout(info_box)
         self._pods_label = QLabel("Pods: 0")
@@ -429,7 +430,7 @@ class SimulationUI(QMainWindow):
 
         inner_splitter.addWidget(left_widget)
 
-        # Right panel (Panda3D container)
+        # 右侧面板（Panda3D 容器）
         self._panda_container = QWidget()
         self._panda_container.setMinimumSize(600, 400)
         self._panda_container.setSizePolicy(
@@ -442,7 +443,7 @@ class SimulationUI(QMainWindow):
 
         self._outer_splitter.addWidget(top_widget)
 
-        # ── Bottom area: matplotlib charts panel (hidden by default) ──
+        # ── 底部区域：matplotlib 图表面板（默认隐藏） ──
         self._charts_widget = self._build_charts_widget()
         self._charts_widget.setVisible(False)
         self._outer_splitter.addWidget(self._charts_widget)
@@ -450,7 +451,7 @@ class SimulationUI(QMainWindow):
         self._outer_splitter.setStretchFactor(1, 1)
 
     def _build_charts_widget(self):
-        """Create the matplotlib charts panel with 3 subplots."""
+        """创建包含 3 个子图的 matplotlib 图表面板。"""
         nm = self._night_mode
         bg = "#0f0f1a" if nm else "#f5f5f8"
         ax_bg = "#16162a" if nm else "#ffffff"
@@ -483,10 +484,10 @@ class SimulationUI(QMainWindow):
         canvas.setMinimumHeight(200)
         return canvas
 
-    # ── Chart drawing ─────────────────────────────────────────────────
+    # ── 图表绘制 ─────────────────────────────────────────────────
 
     def _accumulate_chart_data(self, world_state):
-        """Collect data each tick for charts."""
+        """每个 tick 为图表收集数据。"""
         if self._density is None:
             ms = world_state.map_state
             self._density = np.zeros((ms.rows, ms.cols), dtype=float)
@@ -500,7 +501,7 @@ class SimulationUI(QMainWindow):
         self._throughput.append(world_state.order_state.total_completed)
 
     def _redraw_charts(self, world_state):
-        """Redraw all 3 chart panels."""
+        """重绘全部 3 个图表面板。"""
         for ax in self._chart_axes:
             ax.clear()
             ax.set_facecolor(self._chart_ax_bg)
@@ -568,7 +569,7 @@ class SimulationUI(QMainWindow):
         ax.set_ylabel("Completed Orders", color=self._chart_tick_clr, fontsize=8)
         ax.set_title("Throughput", color=self._chart_title_clr, fontsize=10, pad=6)
 
-    # ── Embed Panda3D ─────────────────────────────────────────────────
+    # ── 嵌入 Panda3D ─────────────────────────────────────────────────
 
     def _embed_panda(self):
         handle = int(self._panda_container.winId())
@@ -592,7 +593,7 @@ class SimulationUI(QMainWindow):
         super().resizeEvent(event)
         self._resize_panda()
 
-    # ── Simulation loop step ──────────────────────────────────────────
+    # ── 仿真循环步骤 ──────────────────────────────────────────
 
     def _sim_step(self):
         if self._stopped:
@@ -610,15 +611,15 @@ class SimulationUI(QMainWindow):
                     return
                 self._last_tick_time = now
 
-                # Accumulate chart data every tick
+                # 每个 tick 累积图表数据
                 self._accumulate_chart_data(self._engine.world)
 
-                # Redraw charts at ~2 fps (every 500ms) if visible
+                # 图表可见时以约 2fps（每 500ms）重绘
                 if self._chart_visible and now - self._chart_last_update > 0.5:
                     self._redraw_charts(self._engine.world)
                     self._chart_last_update = now
 
-        # Pump Panda3D render
+        # 驱动 Panda3D 渲染
         if self._viz._initialised:
             self._viz._update_pods(self._engine.world)
             self._viz._update_agents(self._engine.world)
@@ -649,7 +650,7 @@ class SimulationUI(QMainWindow):
         self._pending_label.setText(f"Pending: {pending}")
         self._inprogress_label.setText(f"In Progress: {in_prog}")
 
-    # ── Button handlers ───────────────────────────────────────────────
+    # ── 按钮处理器 ───────────────────────────────────────────────
 
     def _toggle_pause(self):
         self._paused = not self._paused
@@ -679,7 +680,7 @@ class SimulationUI(QMainWindow):
             "color: #e74c3c; font-size: 14px; font-weight: bold;")
         self._engine._print_summary()
 
-        # Final chart refresh
+        # 最终图表刷新
         if self._chart_visible and self._status_history:
             self._redraw_charts(self._engine.world)
 
@@ -699,13 +700,13 @@ class SimulationUI(QMainWindow):
         self._charts_widget.setVisible(self._chart_visible)
         if self._chart_visible:
             self._chart_btn.setText("\U0001f4ca  Hide Charts")
-            # Immediately redraw with current data
+            # 立即用当前数据重绘
             if self._status_history:
                 self._redraw_charts(self._engine.world)
         else:
             self._chart_btn.setText("\U0001f4ca  Show Charts")
 
-    # ── Keyboard shortcuts ────────────────────────────────────────────
+    # ── 键盘快捷键 ────────────────────────────────────────────
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Space:
@@ -722,7 +723,7 @@ class SimulationUI(QMainWindow):
             self._stop_sim()
         event.accept()
 
-    # ── Public API ────────────────────────────────────────────────────
+    # ── 公共 API ────────────────────────────────────────────────────
 
     def run(self):
         self._engine.logger.info("=" * 60)

@@ -33,7 +33,7 @@ class BasePodReturnPlanner(ABC):
         """
         Decide where to return (drop off) the pod.
 
-        Parameters
+        参数
         ----------
         pod : Pod
             The pod being returned.
@@ -42,7 +42,7 @@ class BasePodReturnPlanner(ABC):
         world_state : WorldState
             Current simulation state (map, agents, pods, etc.).
 
-        Returns
+        返回值
         -------
         tuple[int, int]
             Target (row, col) where the pod should be placed.

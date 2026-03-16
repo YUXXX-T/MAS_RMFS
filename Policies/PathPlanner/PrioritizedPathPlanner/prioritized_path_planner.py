@@ -10,6 +10,12 @@ agents' planned paths as moving obstacles via a reservation table.
 This eliminates most vertex conflicts (two agents on the same cell)
 and edge/swap conflicts (two agents crossing the same edge in
 opposite directions).
+
+基于优先级的多智能体路径规划。
+
+智能体按优先级顺序依次规划路径。每个智能体使用时空 A* 算法寻找无碰撞路径，并通过预留表将高优先级智能体的已规划路径视为移动障碍物。
+
+这种方法消除了大多数顶点冲突（两个智能体占据同一单元格）和边/交换冲突（两个智能体沿相反方向穿越同一条边）。
 """
 
 import heapq
@@ -35,16 +41,21 @@ class PrioritizedPathPlanner(BasePathPlanner):
     the first agent planned has the highest priority, the second must
     route around the first, etc.
 
+    多智能体路径规划的优先级规划方法
+
+    该方法按顺序（即逐个智能体）进行路径规划。每个智能体利用**时空 A*** 算法来寻找一条无碰撞路径，同时避开已被更高优先级智能体预占的网格单元和时间步。 
+    智能体的优先级由规划引擎调用 ``plan()`` 方法的顺序决定：首个被规划的智能体拥有最高优先级；第二个智能体在规划时必须绕开第一个智能体；以此类推。
+
     Features
     --------
-    * **Vertex conflict avoidance** — two agents may not occupy the
+    * **顶点冲突 avoidance** — two agents may not occupy the
       same cell at the same timestep.
     * **Edge (swap) conflict avoidance** — two agents may not swap
       positions in a single timestep.
     * **Wait actions** — an agent can stay in place for one timestep
       to let another agent pass.
 
-    Parameters
+    参数
     ----------
     max_horizon : int
         Maximum number of timesteps the space-time search will
@@ -81,7 +92,12 @@ class PrioritizedPathPlanner(BasePathPlanner):
         the newly planned path to the table, so lower-priority agents
         automatically avoid higher-priority ones.
 
-        Returns
+        利用时空 A* 算法计算一条无碰撞路径。 
+
+        在每个时间步（tick）的首次调用中，系统会根据已规划好路径的智能体重建预留表。 
+        随后的每一次调用都会将新规划的路径添加至该表中，从而确保低优先级智能体能够自动避让高优先级智能体。
+
+        返回值
         -------
         list[tuple[int, int]]
             Path from start to goal (excluding start), possibly with
@@ -124,8 +140,11 @@ class PrioritizedPathPlanner(BasePathPlanner):
     # ------------------------------------------------------------------
 
     def _pre_reserve_existing_paths(self, world_state) -> None:
-        """Populate the reservation table with all agents' current and
-        planned future positions, including agents waiting at destinations."""
+        """
+        Populate the reservation table with all agents' current and
+        planned future positions, including agents waiting at destinations.
+        在预留表中填入所有智能体的当前位置及计划的未来位置，包括正在目的地等待的智能体。
+        """
         for agent in world_state.agents:
             pos = agent.position
             # Reserve current position at time-step 0
@@ -134,6 +153,8 @@ class PrioritizedPathPlanner(BasePathPlanner):
             if agent.is_waiting:
                 # Agent is parked at this position for wait_ticks more ticks
                 # plus a buffer so new paths don't target this cell too early
+                # 智能体停驻在此位置，并将继续等待 wait_ticks 个时间步
+                # 此外还额外预留了一段缓冲时间，以防止新路径过早地将此单元格选为目标
                 for t in range(1, agent.wait_ticks + 1 + self.goal_reserve):
                     self._vertex_res.add((pos[0], pos[1], t))
 
@@ -184,6 +205,10 @@ class PrioritizedPathPlanner(BasePathPlanner):
 
         Actions: move to a cardinal neighbour **or** wait in place.
         Avoids vertex and edge reservations from the reservation table.
+
+        在 (行, 列, 时间步) 状态空间中执行 A* 搜索。 
+        动作：移动至相邻的四个正交方向位置 **或** 停留在原地。 
+        避开预留表中记录的顶点和边预留。
         """
         counter = 0
         open_set: list = []
@@ -225,7 +250,7 @@ class PrioritizedPathPlanner(BasePathPlanner):
                 if (nr, nc) in static_blocked:
                     continue
 
-                # Vertex conflict check
+                # 顶点冲突 check
                 if (nr, nc, next_t) in self._vertex_res:
                     continue
 
@@ -233,6 +258,8 @@ class PrioritizedPathPlanner(BasePathPlanner):
                 # (for pickup/delivery/return processing).  Ensure the
                 # goal cell is clear for the full occupancy window so we
                 # don't conflict with another agent that arrives later.
+                # 当智能体抵达目标位置时，它将停留在此处 （以便进行取货/送货/归还等处理）。因此，必须确保
+                # 目标单元格在整个占用时间窗口内均保持空闲，以避免与随后抵达的其他智能体发生冲突。
                 if (nr, nc) == goal:
                     goal_blocked = False
                     for ft in range(next_t + 1, next_t + 1 + self.goal_reserve):

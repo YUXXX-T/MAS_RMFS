@@ -30,7 +30,7 @@ class BasePathPlanner(ABC):
         """
         Compute a path from the agent's current position to the goal.
 
-        Parameters
+        参数
         ----------
         agent : AgentState
             The agent requesting a path.
@@ -39,7 +39,7 @@ class BasePathPlanner(ABC):
         world_state : WorldState
             Current simulation state (for map & obstacle info).
 
-        Returns
+        返回值
         -------
         list[tuple[int, int]]
             Sequence of (row, col) positions forming the path,

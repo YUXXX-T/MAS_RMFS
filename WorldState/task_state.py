@@ -27,7 +27,7 @@ class Task:
     """
     An atomic task for a robot agent.
 
-    Attributes
+    属性
     ----------
     task_id : int
         Unique task identifier.
@@ -79,7 +79,7 @@ class TaskState:
     """
     Container managing all tasks in the system.
 
-    Attributes
+    属性
     ----------
     tasks : dict[int, Task]
         All tasks keyed by task_id.

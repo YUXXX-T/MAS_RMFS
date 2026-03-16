@@ -1,13 +1,13 @@
 """
-MAS-RMFS: Multi-Agent Simulation for Robotic Mobile Fulfillment System
+MAS-RMFS：多智能体机器人移动履行系统仿真
 ======================================================================
-Entry point for the simulation.
+仿真程序入口。
 
-Usage:
-    python main.py                          # Use default config
-    python main.py --config path/to/cfg.json  # Use custom config
-    python main.py --visualize              # Enable terminal visualization
-    python main.py --mpl                    # Enable matplotlib dashboard
+用法：
+    python main.py                          # 使用默认配置
+    python main.py --config path/to/cfg.json  # 使用自定义配置
+    python main.py --visualize              # 启用终端可视化
+    python main.py --mpl                    # 启用 matplotlib 仪表盘
 """
 
 import argparse
@@ -16,7 +16,7 @@ import sys
 
 from Config.config_loader import load_config, SimulationConfig
 from Engine.simulation_engine import SimulationEngine
-import Policies  # noqa: F401  — triggers algorithm self-registration
+import Policies  # noqa: F401 — 触发算法自动注册
 from Policies.policy_registry import get_policy
 from Visualization.visualizer import TerminalVisualizer, MatplotlibVisualizer
 from Debug.logger import SimLogger
@@ -24,40 +24,40 @@ from Debug.logger import SimLogger
 
 def main():
     parser = argparse.ArgumentParser(
-        description="MAS-RMFS: Multi-Agent Simulation for Robotic Mobile Fulfillment System"
+        description="MAS-RMFS：多智能体机器人移动履行系统仿真"
     )
     parser.add_argument(
         "--config",
         type=str,
         default=os.path.join(os.path.dirname(__file__), "Config", "default_config.json"),
-        help="Path to the JSON configuration file.",
+        help="JSON 配置文件路径。",
     )
 
     viz_group = parser.add_mutually_exclusive_group()
     viz_group.add_argument(
         "--visualize",
         action="store_true",
-        help="Enable terminal-based ASCII visualization each tick.",
+        help="每个 tick 启用基于终端的 ASCII 可视化。",
     )
     viz_group.add_argument(
         "--mpl",
         action="store_true",
-        help="Enable animated matplotlib 2×2 dashboard.",
+        help="启用 matplotlib 2×2 动态仪表盘。",
     )
     viz_group.add_argument(
         "--p3d",
         action="store_true",
-        help="Enable Panda3D 2D orthographic visualization.",
+        help="启用 Panda3D 2D 正交可视化。",
     )
 
     args = parser.parse_args()
 
-    # --- Load configuration ---
+    # --- 加载配置 ---
     logger = SimLogger("Main")
     logger.info(f"Loading config from: {args.config}")
     config = load_config(args.config)
 
-    # --- Instantiate policies from config ---
+    # --- 从配置实例化策略 ---
     og_name, og_params = config.policies.order_generator
     ta_name, ta_params = config.policies.task_assigner
     pp_name, pp_params = config.policies.path_planner
@@ -82,10 +82,10 @@ def main():
     path_planner = PathPlannerCls(**pp_params)
     pod_return_planner = PodReturnPlannerCls(**rp_params)
 
-    # Inject return planner into the task assigner
+    # 将归还规划器注入任务分配器
     task_assigner.pod_return_planner = pod_return_planner
 
-    # --- Optional visualizer ---
+    # --- 可选的可视化器 ---
     if args.mpl:
         visualizer = MatplotlibVisualizer(
             night_mode=config.simulation.night_mode,
@@ -102,7 +102,7 @@ def main():
     else:
         visualizer = None
 
-    # --- Create engine ---
+    # --- 创建引擎 ---
     engine = SimulationEngine(
         config=config,
         order_generator=order_generator,
@@ -111,9 +111,9 @@ def main():
         visualizer=visualizer,
     )
 
-    # --- Run ---
+    # --- 运行 ---
     if args.p3d and visualizer is not None:
-        # Qt UI drives the loop (replaces engine.run)
+        # Qt UI 驱动循环（替代 engine.run）
         from Visualization.ui import SimulationUI
         ui = SimulationUI(
             engine=engine,

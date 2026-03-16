@@ -3,6 +3,10 @@ Visualizer Module
 =================
 Visualization backends for the MAS-RMFS simulation.
 
+可视化模块
+=================
+MAS-RMFS 仿真的可视化后端。
+
 Includes:
     - TerminalVisualizer  — ASCII grid to stdout
     - MatplotlibVisualizer — animated 2×2 dashboard
@@ -29,7 +33,8 @@ class BaseVisualizer(ABC):
 class TerminalVisualizer(BaseVisualizer):
     """
     Simple text-based visualizer that prints a grid to stdout.
-
+    一个简单的文本可视化工具，将网格输出至标准输出。
+    
     Legend:
         .  = free cell
         #  = obstacle
@@ -85,17 +90,17 @@ class TerminalVisualizer(BaseVisualizer):
 
 class MatplotlibVisualizer(BaseVisualizer):
     """
-    Animated 2×2 matplotlib dashboard updated every simulation tick.
+    每个仿真 tick 更新的 2×2 matplotlib 动画仪表盘。
 
     Panels
     ------
-    Top-left     : Live warehouse grid (obstacles, stations, pods, robots).
-    Top-right    : Cumulative path-density heatmap (YlOrRd).
-    Bottom-left  : Agent-status timeline (agent × tick colour-coded).
-    Bottom-right : Cumulative completed-orders throughput curve.
+    左上：实时仓库网格（障碍物、工作站、货架、机器人）。
+    右上：累积路径密度热力图 (YlOrRd)。
+    左下：智能体状态时间线（智能体 × tick 颜色编码）。
+    右下：累积已完成订单吞吐量曲线。
     """
 
-    # Status → integer code for the timeline colour-map
+    # 状态 → 时间线颜色映射的整数编码
     _STATUS_CODES = {
         "IDLE": 0,
         "MOVING_TO_POD": 1,
@@ -107,7 +112,7 @@ class MatplotlibVisualizer(BaseVisualizer):
 
     def __init__(self, night_mode: bool = True):
         import matplotlib
-        matplotlib.use("TkAgg")          # ensure interactive backend
+        matplotlib.use("TkAgg")          # 确保交互式后端
         import matplotlib.pyplot as plt
         from matplotlib.colors import ListedColormap
 
@@ -117,7 +122,7 @@ class MatplotlibVisualizer(BaseVisualizer):
         self._initialised = False
         self._night_mode = night_mode
 
-        # Theme colours
+        # 主题颜色
         if night_mode:
             self._bg = "#0f0f1a"
             self._ax_bg = "#16162a"
@@ -143,16 +148,16 @@ class MatplotlibVisualizer(BaseVisualizer):
             self._label_bg = "#ffffff"
             self._idle_clr = "#dddde8"
 
-        # Cumulative data stored across ticks
+        # 跨 tick 累积存储的数据
         self._density: np.ndarray | None = None     # (rows, cols) float
         self._status_history: List[List[int]] = []   # tick → [status_code per agent]
         self._throughput: List[int] = []             # completed orders per tick
 
-        # Distinct robot colours (up to 10 agents)
+        # 不同机器人颜色（最多 10 个智能体）
         self._robot_cmap = plt.cm.get_cmap("tab10")
 
-        # Custom discrete colour-map for the timeline panel
-        # Order: IDLE, MOVING_TO_POD, CARRYING, DELIVERING, RETURNING, MOVING
+        # 时间线面板的自定义离散颜色映射
+        # 顺序：IDLE, MOVING_TO_POD, CARRYING, DELIVERING, RETURNING, MOVING
         self._timeline_cmap = ListedColormap(
             [self._idle_clr,  # IDLE
              "#4361ee",       # MOVING_TO_POD – blue
@@ -163,19 +168,19 @@ class MatplotlibVisualizer(BaseVisualizer):
         )
         self._timeline_labels = list(self._STATUS_CODES.keys())
 
-    # ---- public API --------------------------------------------------------
+    # ---- 公共 API --------------------------------------------------------
 
     def render(self, world_state: "WorldState"):
-        """Called once per tick by the simulation engine."""
+        """每个 tick 由仿真引擎调用一次。"""
         plt = self._plt
 
         if not self._initialised:
             self._setup(world_state)
 
-        # Accumulate data
+        # 累积数据
         self._accumulate(world_state)
 
-        # Redraw each panel
+        # 重绘每个面板
         for ax in self._axes.flat:
             ax.clear()
 
@@ -215,30 +220,30 @@ class MatplotlibVisualizer(BaseVisualizer):
     # ---- data accumulation -------------------------------------------------
 
     def _accumulate(self, world_state):
-        # Path density: +1 for every cell occupied by a robot this tick
+        # 路径密度：本 tick 每个机器人占据的格子 +1
         for agent in world_state.agents:
             r, c = agent.position
             self._density[r, c] += 1.0
 
-        # Status history: one row per tick
+        # 状态历史：每个 tick 一行
         codes = []
         for agent in world_state.agents:
             codes.append(self._STATUS_CODES.get(agent.status.name, 0))
         self._status_history.append(codes)
 
-        # Throughput: cumulative completed orders
+        # 吞吐量：累积已完成订单
         self._throughput.append(world_state.order_state.total_completed)
 
     # ---- panel drawers -----------------------------------------------------
 
     def _draw_grid(self, ax, world_state):
-        """Top-left: live warehouse grid."""
+        """左上：实时仓库网格。"""
         from WorldState.map_state import CellType
 
         ms = world_state.map_state
         rows, cols = ms.rows, ms.cols
 
-        # Background cell colour matrix
+        # 背景单元格颜色矩阵
         grid = np.ones((rows, cols, 3)) * np.array(self._grid_base)
 
         for r in range(rows):
@@ -251,7 +256,7 @@ class MatplotlibVisualizer(BaseVisualizer):
 
         ax.imshow(grid, origin="upper", aspect="equal")
 
-        # Grid lines
+        # 网格线
         for i in range(rows + 1):
             ax.axhline(i - 0.5, color=self._grid_line_clr, linewidth=0.5)
         for j in range(cols + 1):
@@ -295,7 +300,7 @@ class MatplotlibVisualizer(BaseVisualizer):
         ax.set_title("Warehouse Grid", color=self._title_clr, fontsize=11, pad=8)
 
     def _draw_density(self, ax, world_state):
-        """Top-right: cumulative path density heatmap."""
+        """右上：累积路径密度热力图。"""
         im = ax.imshow(
             self._density, cmap="YlOrRd", origin="upper", aspect="equal",
             interpolation="nearest",
@@ -306,7 +311,7 @@ class MatplotlibVisualizer(BaseVisualizer):
         ax.set_title("Path Density (cumulative)", color=self._title_clr,
                       fontsize=11, pad=8)
 
-        # Lightweight colour-bar (recreate on first call, update value range)
+        # 轻量颜色条（首次调用时创建，更新值范围）
         if not hasattr(self, "_density_cb"):
             self._density_cb = self._fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             self._density_cb.ax.tick_params(colors=self._tick_clr, labelsize=7)
@@ -314,14 +319,14 @@ class MatplotlibVisualizer(BaseVisualizer):
             self._density_cb.update_normal(im)
 
     def _draw_timeline(self, ax, world_state):
-        """Bottom-left: agent status timeline (agent × tick)."""
+        """左下：智能体状态时间线（智能体 × tick）。"""
         if not self._status_history:
             return
 
         n_agents = len(world_state.agents)
         n_ticks = len(self._status_history)
 
-        # Build matrix: rows = agents, cols = ticks
+        # 构建矩阵：行 = 智能体，列 = ticks
         mat = np.zeros((n_agents, n_ticks), dtype=int)
         for t, row in enumerate(self._status_history):
             for a, code in enumerate(row):
@@ -339,7 +344,7 @@ class MatplotlibVisualizer(BaseVisualizer):
         ax.set_title("Agent Status Timeline", color=self._title_clr,
                       fontsize=11, pad=8)
 
-        # Legend (status labels)
+        # 图例（状态标签）
         if not hasattr(self, "_timeline_legend_drawn"):
             from matplotlib.patches import Patch
             patches = [
@@ -354,13 +359,13 @@ class MatplotlibVisualizer(BaseVisualizer):
             self._timeline_legend_drawn = True
 
     def _draw_throughput(self, ax, world_state):
-        """Bottom-right: cumulative completed orders."""
+        """右下：累积已完成订单。"""
         ticks = list(range(len(self._throughput)))
 
         ax.fill_between(ticks, self._throughput, alpha=0.15, color="#2ecc71")
         ax.plot(ticks, self._throughput, color="#2ecc71", linewidth=2)
 
-        # Numeric annotation
+        # 数字标注
         current = self._throughput[-1] if self._throughput else 0
         rate = current / max(world_state.tick, 1)
         ax.text(

@@ -14,6 +14,22 @@ Supports two camera modes controlled by ``view_mode``:
 The window runs in the same process — the simulation engine
 calls ``render()`` each tick, which updates node positions
 and pumps the Panda3D event loop once.
+
+Panda3D 仓库可视化工具
+==============================
+基于 Panda3D 实现的实时仓库可视化。
+
+支持两种摄像机模式，由参数 ``view_mode`` 控制：
+
+* ``"2d"`` —— 正交俯视模式。物体显示为扁平的四边形，无深度感。
+* ``"3d"`` —— 采用等轴测视角的透视摄像机模式。 
+障碍物和工作站显示为立体方块；货架（Pods）和机器人则显示为较高的四边形。 
+该模式启用了鼠标环绕控制，用户可以通过鼠标进行旋转、平移和缩放操作。
+
+可视化窗口与仿真引擎运行在同一进程中 ——
+仿真引擎在每个时间步（tick）调用一次 ``render()`` 方法，
+该方法负责更新场景节点的位置，并驱动 Panda3D 的事件循环执行一次。
+
 """
 
 import math
@@ -136,8 +152,9 @@ def _make_box(name: str, sx: float, sy: float, sz: float) -> NodePath:
 class Panda3DVisualizer(BaseVisualizer):
     """
     Warehouse visualizer with switchable 2D / 3D camera.
+    支持 2D / 3D 视角切换的仓库可视化工具
 
-    Parameters
+    参数
     ----------
     view_mode : str
         ``"2d"`` for orthographic top-down (default),
@@ -162,10 +179,10 @@ class Panda3DVisualizer(BaseVisualizer):
         self._hud_np: NodePath | None = None
         self._parent_window_handle: int | None = None
 
-    # ── public API ────────────────────────────────────────────────────
+    # ── 公共 API ────────────────────────────────────────────────────
 
     def render(self, world_state: "WorldState"):
-        """Called once per tick by the simulation engine."""
+        """每个 tick 由仿真引擎调用一次。"""
         if not self._initialised:
             self._setup(world_state)
 
@@ -196,7 +213,7 @@ class Panda3DVisualizer(BaseVisualizer):
 
         wp = WindowProperties()
         mode_label = "3D" if is_3d else "2D"
-        wp.setTitle(f"MAS-RMFS  —  Panda3D {mode_label}")
+        wp.set标题(f"MAS-RMFS  —  Panda3D {mode_label}")
         if self._parent_window_handle is not None:
             wp.setParentWindow(self._parent_window_handle)
             wp.setOrigin(0, 0)
@@ -207,18 +224,18 @@ class Panda3DVisualizer(BaseVisualizer):
         else:
             self._app.win.requestProperties(wp)
 
-        # Set background AFTER window exists
+        # 在窗口存在之后设置背景颜色
         self._app.setBackgroundColor(self._pal["bg"])
         self._app.render.setAntialias(AntialiasAttrib.MMultisample)
 
-        # Track window size for aspect ratio correction
+        # 追踪窗口大小以修正宽高比
         self._win_aspect = (wp.getXSize() / wp.getYSize()
                             if wp.getYSize() > 0 else 1.0)
         self._app.accept("window-event", self._on_window_event)
 
-        # Centre of the grid in world coords
-        # 3D: X = col, Y = -row (depth), Z = up
-        # 2D: X = col, Y = depth (camera axis), Z = -row
+        # 网格在世界坐标中的中心
+        # 3D：X = 列, Y = -行（深度）, Z = 向上
+        # 2D：X = 列, Y = 深度（相机轴）, Z = -行
         cx = (cols - 1) * CELL / 2
         cy_3d = -((rows - 1) * CELL / 2)   # centre Y for 3D
         cz_2d = -((rows - 1) * CELL / 2)   # centre Z for 2D
@@ -232,7 +249,7 @@ class Panda3DVisualizer(BaseVisualizer):
             lens.setNearFar(0.5, 500)
             self._app.cam.node().setLens(lens)
 
-            # Orbit camera state (spherical coords around pivot)
+            # 轨道相机状态（围绕枢轴的球坐标）
             self._cam_pivot = LPoint3f(cx, cy_3d, 0)
             self._cam_heading = -135.0  # degrees
             self._cam_pitch = 35.0      # degrees above horizon
@@ -240,7 +257,7 @@ class Panda3DVisualizer(BaseVisualizer):
             self._mouse_prev = None
             self._update_orbit_camera()
 
-            # Bind mouse events for orbit / pan / zoom
+            # 绑定鼠标事件用于旋转 / 平移 / 缩放
             self._app.accept("mouse1",    self._on_mouse_down, [1])
             self._app.accept("mouse1-up", self._on_mouse_up, [1])
             self._app.accept("mouse3",    self._on_mouse_down, [3])
@@ -250,17 +267,17 @@ class Panda3DVisualizer(BaseVisualizer):
             self._mouse_btn = 0
             self._app.taskMgr.add(self._orbit_task, "orbit_camera")
 
-            # Keyboard view presets
+            # 键盘视角预设
             self._app.accept("1", self._set_view_preset, ["top"])
             self._app.accept("2", self._set_view_preset, ["front"])
             self._app.accept("3", self._set_view_preset, ["right"])
             self._app.accept("4", self._set_view_preset, ["iso"])
             self._app.accept("r", self._set_view_preset, ["reset"])
 
-            # Build axis gizmo
+            # 构建坐标轴指示器
             self._setup_axis_gizmo()
         else:
-            # ---- 2D orthographic ----
+            # ---- 2D 正交 ----
             self._app.disableMouse()
             lens = OrthographicLens()
             half_w = cols * CELL / 2 + 1.0
@@ -274,7 +291,7 @@ class Panda3DVisualizer(BaseVisualizer):
             self._app.cam.setPos(cx, -10, cz_2d)
             self._app.cam.lookAt(cx, 0, cz_2d)
 
-            # 2D mouse controls: scroll = zoom, right-drag = pan
+            # 2D 鼠标控制：滚轮 = 缩放，右键拖动 = 平移
             self._app.accept("wheel_up",   self._on_zoom_2d, [-1])
             self._app.accept("wheel_down",  self._on_zoom_2d, [1])
             self._app.accept("mouse3",      self._on_mouse_down, [3])
@@ -283,9 +300,9 @@ class Panda3DVisualizer(BaseVisualizer):
             self._mouse_prev = None
             self._app.taskMgr.add(self._pan_task_2d, "pan_2d")
 
-        # ---- Static grid cells ----
+        # ---- 静态网格单元 ----
         if self._use_gpu:
-            # Use RigidBodyCombiner to batch static tiles into one draw call
+            # 使用 RigidBodyCombiner 将静态地砖批量合并为一次绘制调用
             rbc = RigidBodyCombiner("static_grid")
             static_root = self._app.render.attachNewNode(rbc)
         else:
@@ -314,7 +331,7 @@ class Panda3DVisualizer(BaseVisualizer):
                 tnp.setPos(sc * CELL, -0.1, -sr * CELL + CELL * 0.35)
                 tnp.setScale(0.25)
 
-        # ---- Grid lines (3D floor lines) ----
+        # ---- 网格线 (3D floor lines) ----
         if is_3d:
             self._draw_grid_lines(static_root, rows, cols)
 
@@ -574,10 +591,10 @@ class Panda3DVisualizer(BaseVisualizer):
             self._help_np.setScale(0.04)
             self._help_np.setPos(1.3, 0, -0.92)
 
-    # ── window resize aspect-ratio correction ─────────────────────────
+    # ── 窗口大小改变时的宽高比修正 ─────────────────────────
 
     def _on_window_event(self, window):
-        """Correct lens aspect ratio when window is resized."""
+        """窗口大小改变时修正镜头宽高比。"""
         if window is None or window != self._app.win:
             return
         w = window.getXSize()
@@ -586,29 +603,29 @@ class Panda3DVisualizer(BaseVisualizer):
             return
         aspect = w / h
         if abs(aspect - self._win_aspect) < 0.001:
-            return  # no meaningful change
+            return  # 无明显变化
         self._win_aspect = aspect
 
         lens = self._app.cam.node().getLens()
         if self._is_3d:
-            # Perspective: set aspect ratio directly
+            # 透视：直接设置宽高比
             lens.setAspectRatio(aspect)
         else:
-            # Ortho: adjust film width while keeping height constant
-            # so vertical extent stays the same and horizontal
-            # extends proportionally → no distortion
+            # 正交：调整胶片宽度同时保持高度不变
+            # 使垂直范围不变，水平范围
+            # 按比例扩展 → 无变形
             self._ortho_film_w = self._ortho_film_h * aspect
             lens.setFilmSize(self._ortho_film_w, self._ortho_film_h)
 
-    # ── custom orbit camera (3D only) ────────────────────────────────
+    # ── 自定义轨道相机（仅 3D） ────────────────────────────────
 
     def _update_orbit_camera(self):
-        """Reposition camera from spherical coords around pivot."""
+        """从围绕枢轴的球坐标重新定位相机。"""
         h_rad = math.radians(self._cam_heading)
         p_rad = math.radians(self._cam_pitch)
         d = self._cam_dist
 
-        # Spherical → Cartesian (Panda3D: Y = forward, Z = up)
+        # 球坐标 → 笛卡尔坐标（Panda3D：Y = 前方，Z = 向上）
         cos_p = math.cos(p_rad)
         cam_x = self._cam_pivot.x + d * cos_p * math.sin(h_rad)
         cam_y = self._cam_pivot.y - d * cos_p * math.cos(h_rad)
@@ -627,7 +644,7 @@ class Panda3DVisualizer(BaseVisualizer):
             self._mouse_prev = None
 
     def _on_zoom(self, direction):
-        """Scroll wheel zoom (3D): direction -1 = zoom in, +1 = zoom out."""
+        """滚轮缩放（3D）：方向 -1 = 放大，+1 = 缩小。"""
         factor = 1.15
         if direction < 0:
             self._cam_dist /= factor
@@ -637,7 +654,7 @@ class Panda3DVisualizer(BaseVisualizer):
         self._update_orbit_camera()
 
     def _on_zoom_2d(self, direction):
-        """Scroll wheel zoom (2D): adjust ortho film size for proportional scaling."""
+        """滚轮缩放（2D）：调整正交胶片大小实现等比缩放。"""
         factor = 1.12
         if direction < 0:
             self._ortho_film_w /= factor
@@ -645,14 +662,14 @@ class Panda3DVisualizer(BaseVisualizer):
         else:
             self._ortho_film_w *= factor
             self._ortho_film_h *= factor
-        # Clamp to reasonable range
+        # 限制在合理范围内
         self._ortho_film_w = max(2.0, min(200.0, self._ortho_film_w))
         self._ortho_film_h = max(2.0, min(200.0, self._ortho_film_h))
         lens = self._app.cam.node().getLens()
         lens.setFilmSize(self._ortho_film_w, self._ortho_film_h)
 
     def _pan_task_2d(self, task):
-        """Right-drag pan for 2D orthographic view."""
+        """右键拖动平移 2D 正交视图。"""
         if not self._app.mouseWatcherNode.hasMouse():
             return task.cont
         mx = self._app.mouseWatcherNode.getMouseX()
@@ -661,7 +678,7 @@ class Panda3DVisualizer(BaseVisualizer):
             if self._mouse_prev is not None:
                 dx = mx - self._mouse_prev[0]
                 dz = mz - self._mouse_prev[1]
-                # Scale pan speed by current film size for consistent feel
+                # 根据当前胶片大小缩放平移速度以保持一致手感
                 scale = self._ortho_film_w * 0.5
                 pos = self._app.cam.getPos()
                 self._app.cam.setPos(
@@ -673,7 +690,7 @@ class Panda3DVisualizer(BaseVisualizer):
         return task.cont
 
     def _set_view_preset(self, name):
-        """Snap camera to a preset view angle."""
+        """将相机切换到预设视角。"""
         presets = {
             "top":   (-90.0, 89.0),   # looking straight down
             "front": (-90.0, 0.1),    # looking from front (-Y)
@@ -696,7 +713,10 @@ class Panda3DVisualizer(BaseVisualizer):
     # ── axis gizmo ────────────────────────────────────────────────────
 
     def _setup_axis_gizmo(self):
-        """Create a small 3D axis indicator in the lower-left corner."""
+        """
+        Create a small 3D axis indicator in the lower-left corner.
+        在左下角创建一个小型的三维坐标轴指示器。
+        """
         # Separate scene for the gizmo
         self._gizmo_root = NodePath("gizmo_root")
         self._gizmo_pivot = self._gizmo_root.attachNewNode("gizmo_pivot")
@@ -751,12 +771,18 @@ class Panda3DVisualizer(BaseVisualizer):
         self._gizmo_dr = dr
 
     def _update_gizmo(self):
-        """Sync gizmo rotation with the main camera orientation."""
+        """
+        Sync gizmo rotation with the main camera orientation.
+        将 Gizmo 的旋转与主摄像机的朝向同步。
+        """
         if not hasattr(self, "_gizmo_pivot"):
             return
         # The gizmo pivot should rotate to match the main camera's view
         # We set the gizmo camera to the same orientation as the main camera
         # but at a fixed distance from origin
+        # 辅助工具的枢轴应旋转，以与主摄像机的视角保持一致。
+        # 我们将辅助工具摄像机的朝向设置为与主摄像机相同，
+        # 但使其与原点保持固定的距离。
         h_rad = math.radians(self._cam_heading)
         p_rad = math.radians(self._cam_pitch)
         d = 5.0
@@ -770,7 +796,10 @@ class Panda3DVisualizer(BaseVisualizer):
         self._gizmo_cam.lookAt(0, 0, 0)
 
     def _orbit_task(self, task):
-        """Per-frame task: reads mouse position delta for orbit/pan."""
+        """
+        Per-frame task: reads mouse position delta for orbit/pan.
+        逐帧任务：读取鼠标位置增量，用于轨道旋转/平移。
+        """
         # Sync gizmo each frame
         self._update_gizmo()
 

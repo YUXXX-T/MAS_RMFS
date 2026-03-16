@@ -1,7 +1,7 @@
 """
-Logger Module
+日志模块
 =============
-Configurable simulation logger wrapping Python's logging module.
+封装 Python logging 模块的可配置仿真日志器。
 """
 
 import logging
@@ -11,7 +11,7 @@ from typing import Optional
 
 class SimLogger:
     """
-    Simulation logger providing per-module logging with configurable levels.
+    提供按模块日志记录、可配置级别的仿真日志器。
 
     Usage
     -----
@@ -28,7 +28,7 @@ class SimLogger:
         level: str = "INFO",
         log_file: Optional[str] = None,
     ):
-        # Reuse existing logger if already created for this name
+        # 如果此名称的日志器已创建则复用
         if name in SimLogger._loggers:
             self._logger = SimLogger._loggers[name]
             return
@@ -37,7 +37,7 @@ class SimLogger:
         self._logger.setLevel(getattr(logging, level.upper(), logging.INFO))
         self._logger.propagate = False
 
-        # Console handler
+        # 控制台处理器
         if not self._logger.handlers:
             fmt = logging.Formatter(
                 fmt="[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s",
@@ -47,7 +47,7 @@ class SimLogger:
             console_handler.setFormatter(fmt)
             self._logger.addHandler(console_handler)
 
-            # Optional file handler
+            # 可选的文件处理器
             if log_file:
                 file_handler = logging.FileHandler(log_file, encoding="utf-8")
                 file_handler.setFormatter(fmt)

@@ -27,7 +27,7 @@ class SimulationEngine:
     The loop runs indefinitely until interrupted (Ctrl+C), at which point
     it prints a summary and exits gracefully.
 
-    Parameters
+    参数
     ----------
     config : SimulationConfig
         Loaded simulation configuration.
@@ -69,7 +69,7 @@ class SimulationEngine:
 
         Press Ctrl+C to stop gracefully.
         """
-        # Register signal handler for graceful shutdown
+        # 注册信号处理器以优雅停机
         original_handler = signal.getsignal(signal.SIGINT)
 
         def _shutdown(signum, frame):
@@ -104,7 +104,7 @@ class SimulationEngine:
         """Execute one simulation tick."""
         tick = self.world.tick
 
-        # --- Step 1: Generate orders ---
+        # --- 步骤 1：生成订单 ---
         new_orders = self.order_generator.generate(self.world)
         for order in new_orders:
             self.world.order_state.add_order(order)
@@ -113,7 +113,7 @@ class SimulationEngine:
                 f"pods={order.pod_ids} -> station {order.station_id}"
             )
 
-        # --- Step 2: Assign tasks ---
+        # --- 步骤 2：分配任务 ---
         new_tasks = self.task_assigner.assign(self.world)
         for task in new_tasks:
             self.logger.debug(
@@ -128,16 +128,16 @@ class SimulationEngine:
         prev_positions = {agent.agent_id: agent.position for agent in self.world.agents}
         self._move_agents(tick)
 
-        # --- Step 5: Detect conflicts (vertex & oncoming/swap) ---
+        # --- 步骤 5：检测冲突 (vertex & oncoming/swap) ---
         self._detect_conflicts(tick, prev_positions)
 
         # --- Step 6: Handle pickups, deliveries, returns ---
         self._handle_actions(tick)
 
-        # --- Step 7: Check order completion ---
+        # --- 步骤 7：检查订单完成 ---
         self._check_order_completion(tick)
 
-        # --- Step 8: Visualize (optional) ---
+        # --- 步骤 8：可视化（可选） ---
         if self.visualizer:
             self.visualizer.render(self.world)
 
@@ -207,14 +207,14 @@ class SimulationEngine:
     def _detect_conflicts(self, tick: int, prev_positions: dict):
         """Detect vertex conflicts and oncoming (head-on swap) conflicts.
 
-        Parameters
+        参数
         ----------
         tick : int
-            Current simulation tick.
+            当前仿真 tick。
         prev_positions : dict[int, tuple[int, int]]
             Mapping of agent_id -> position *before* this tick's movement.
         """
-        # --- Vertex conflicts: two agents on the same cell ---
+        # --- 顶点冲突s: two agents on the same cell ---
         pos_to_agents: dict[tuple, list] = {}
         for agent in self.world.agents:
             pos_to_agents.setdefault(agent.position, []).append(agent.agent_id)

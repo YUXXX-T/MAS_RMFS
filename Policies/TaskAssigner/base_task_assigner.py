@@ -19,7 +19,7 @@ class BaseTaskAssigner(ABC):
     Implementations decide how to decompose orders into tasks
     and assign them to available agents.
 
-    Attributes
+    属性
     ----------
     pod_return_planner : BasePodReturnPlanner or None
         Optional return planner injected after construction.
@@ -34,12 +34,12 @@ class BaseTaskAssigner(ABC):
         """
         Assign pending orders to idle agents by creating tasks.
 
-        Parameters
+        参数
         ----------
         world_state : WorldState
             Current simulation state.
 
-        Returns
+        返回值
         -------
         list[Task]
             Newly created and assigned tasks.

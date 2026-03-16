@@ -17,7 +17,7 @@ class RandomOrderGenerator(BaseOrderGenerator):
 
     Each order picks 1..max_items random available pods and a random station.
 
-    Parameters
+    参数
     ----------
     order_interval : int
         Generate a new order every N ticks.

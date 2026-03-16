@@ -24,12 +24,12 @@ class BaseOrderGenerator(ABC):
         """
         Generate new orders based on the current world state.
 
-        Parameters
+        参数
         ----------
         world_state : WorldState
             Current simulation state including tick counter.
 
-        Returns
+        返回值
         -------
         list[Order]
             Newly generated orders (may be empty).
