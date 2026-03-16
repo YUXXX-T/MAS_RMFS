@@ -428,9 +428,9 @@ list_policies(category=None)     # 列出已注册的算法
 
 ### 🎬 DEMO (Current)
 🔷 Simulation in 3D:
-![demo_3d](./demo/demo_3d.png)
+![demo_3d](./pic/demo_3d.png)
 🔶 Simulation in 2D (achieved by matplotlib):
-![demo_mpl](./demo/demo_mpl.png)
+![demo_mpl](./pic/demo_mpl.png)
 
 ## 📄 License
 
