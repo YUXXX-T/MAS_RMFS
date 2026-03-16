@@ -70,40 +70,45 @@ PAD  = 0.02       # gap between cell quads
 
 
 def _make_box(name: str, sx: float, sy: float, sz: float) -> NodePath:
-    """Build a simple 6-face box from cards centred at origin."""
+    """Build a simple 6-face box centred at origin.
+
+    sx = size along X, sy = size along Y, sz = size along Z (up).
+    """
     root = NodePath(name)
-    cm = CardMaker(name)
     hx, hy, hz = sx / 2, sy / 2, sz / 2
 
-    # top (+Z)
-    cm.setFrame(-hx, hx, -hy, hy)
-    top = root.attachNewNode(cm.generate())
+    # top (+Z) — card lies flat facing up
+    cm_top = CardMaker(name + "_top")
+    cm_top.setFrame(-hx, hx, -hy, hy)
+    top = root.attachNewNode(cm_top.generate())
     top.setP(-90)
     top.setPos(0, 0, hz)
 
     # bottom (-Z)
-    bot = root.attachNewNode(cm.generate())
+    bot = root.attachNewNode(cm_top.generate())
     bot.setP(90)
     bot.setPos(0, 0, -hz)
 
-    # front (-Y)
-    cm.setFrame(-hx, hx, -hz, hz)
-    front = root.attachNewNode(cm.generate())
+    # front (-Y) — card faces camera
+    cm_fwd = CardMaker(name + "_fwd")
+    cm_fwd.setFrame(-hx, hx, -hz, hz)
+    front = root.attachNewNode(cm_fwd.generate())
     front.setPos(0, -hy, 0)
 
     # back (+Y)
-    back = root.attachNewNode(cm.generate())
+    back = root.attachNewNode(cm_fwd.generate())
     back.setH(180)
     back.setPos(0, hy, 0)
 
     # left (-X)
-    cm.setFrame(-hy, hy, -hz, hz)
-    left = root.attachNewNode(cm.generate())
+    cm_side = CardMaker(name + "_side")
+    cm_side.setFrame(-hy, hy, -hz, hz)
+    left = root.attachNewNode(cm_side.generate())
     left.setH(90)
     left.setPos(-hx, 0, 0)
 
     # right (+X)
-    right = root.attachNewNode(cm.generate())
+    right = root.attachNewNode(cm_side.generate())
     right.setH(-90)
     right.setPos(hx, 0, 0)
 
@@ -156,6 +161,7 @@ class Panda3DVisualizer(BaseVisualizer):
         ms = world_state.map_state
         rows, cols = ms.rows, ms.cols
         is_3d = self._view_mode == "3d"
+        self._map_size = (rows, cols)
 
         # ---- ShowBase ----
         self._app = ShowBase()
@@ -170,8 +176,11 @@ class Panda3DVisualizer(BaseVisualizer):
         self._app.render.setAntialias(AntialiasAttrib.MMultisample)
 
         # Centre of the grid in world coords
+        # 3D: X = col, Y = -row (depth), Z = up
+        # 2D: X = col, Y = depth (camera axis), Z = -row
         cx = (cols - 1) * CELL / 2
-        cz = -((rows - 1) * CELL / 2)
+        cy_3d = -((rows - 1) * CELL / 2)   # centre Y for 3D
+        cz_2d = -((rows - 1) * CELL / 2)   # centre Z for 2D
 
         if is_3d:
             # ---- 3D perspective with custom orbit camera ----
@@ -183,8 +192,8 @@ class Panda3DVisualizer(BaseVisualizer):
             self._app.cam.node().setLens(lens)
 
             # Orbit camera state (spherical coords around pivot)
-            self._cam_pivot = LPoint3f(cx, 0, cz)
-            self._cam_heading = -45.0   # degrees
+            self._cam_pivot = LPoint3f(cx, cy_3d, 0)
+            self._cam_heading = -135.0  # degrees
             self._cam_pitch = 35.0      # degrees above horizon
             self._cam_dist = max(rows, cols) * CELL * 1.5
             self._mouse_prev = None
@@ -199,6 +208,16 @@ class Panda3DVisualizer(BaseVisualizer):
             self._app.accept("wheel_down", self._on_zoom, [1])
             self._mouse_btn = 0
             self._app.taskMgr.add(self._orbit_task, "orbit_camera")
+
+            # Keyboard view presets
+            self._app.accept("1", self._set_view_preset, ["top"])
+            self._app.accept("2", self._set_view_preset, ["front"])
+            self._app.accept("3", self._set_view_preset, ["right"])
+            self._app.accept("4", self._set_view_preset, ["iso"])
+            self._app.accept("r", self._set_view_preset, ["reset"])
+
+            # Build axis gizmo
+            self._setup_axis_gizmo()
         else:
             # ---- 2D orthographic ----
             self._app.disableMouse()
@@ -209,8 +228,8 @@ class Panda3DVisualizer(BaseVisualizer):
             lens.setNearFar(-100, 100)
             self._app.cam.node().setLens(lens)
 
-            self._app.cam.setPos(cx, -10, cz)
-            self._app.cam.lookAt(cx, 0, cz)
+            self._app.cam.setPos(cx, -10, cz_2d)
+            self._app.cam.lookAt(cx, 0, cz_2d)
 
         # ---- Static grid cells ----
         static_root = self._app.render.attachNewNode("static_grid")
@@ -231,7 +250,7 @@ class Panda3DVisualizer(BaseVisualizer):
             tn.setCardDecal(True)
             tnp = static_root.attachNewNode(tn)
             if is_3d:
-                tnp.setPos(sc * CELL, 0, -sr * CELL + CELL * 0.35)
+                tnp.setPos(sc * CELL, -sr * CELL, 0.6)
                 tnp.setScale(0.25)
                 tnp.setBillboardPointEye()
             else:
@@ -249,7 +268,7 @@ class Panda3DVisualizer(BaseVisualizer):
             if is_3d:
                 np = _make_box("pod", CELL * 0.6, CELL * 0.6, CELL * 0.35)
                 np.reparentTo(pod_root)
-                np.setPos(pc * CELL, 0, -pr * CELL + CELL * 0.175)
+                np.setPos(pc * CELL, -pr * CELL, CELL * 0.175)
             else:
                 pod_cm = CardMaker("pod")
                 s = CELL * 0.35
@@ -351,9 +370,10 @@ class Panda3DVisualizer(BaseVisualizer):
                 np.setColor(clr)
 
     def _build_grid_3d(self, parent, ms, rows, cols):
+        """3D grid: XY ground plane, Z = up."""
         from WorldState.map_state import CellType
 
-        # Floor tiles (thin cards in the XY plane, rotated flat)
+        # Floor tiles — lie flat on XY plane (face +Z)
         floor_cm = CardMaker("floor")
         floor_cm.setFrame(-CELL / 2 + PAD, CELL / 2 - PAD,
                           -CELL / 2 + PAD, CELL / 2 - PAD)
@@ -361,52 +381,50 @@ class Panda3DVisualizer(BaseVisualizer):
         for r in range(rows):
             for c in range(cols):
                 cell = ms.grid[r][c]
+                x = c * CELL
+                y = -r * CELL
 
                 if cell == CellType.OBSTACLE:
-                    # Raised box
+                    # Raised box sitting on the floor
                     box = _make_box("obs", CELL - PAD * 2, CELL - PAD * 2, CELL * 0.5)
                     box.reparentTo(parent)
-                    box.setPos(c * CELL, 0, -r * CELL + CELL * 0.25)
+                    box.setPos(x, y, CELL * 0.25)
                     box.setColor(_CLR_OBSTACLE)
-                elif cell == CellType.STATION:
-                    # Flat red tile on the floor + a small raised marker
-                    np = parent.attachNewNode(floor_cm.generate())
-                    np.setP(-90)
-                    np.setPos(c * CELL, 0, -r * CELL)
-                    np.setColor(_CLR_STATION)
-                elif cell == CellType.POD_HOME:
-                    np = parent.attachNewNode(floor_cm.generate())
-                    np.setP(-90)
-                    np.setPos(c * CELL, 0, -r * CELL)
-                    np.setColor(_CLR_POD_HOME)
                 else:
+                    # Flat tile on the ground
                     np = parent.attachNewNode(floor_cm.generate())
-                    np.setP(-90)
-                    np.setPos(c * CELL, 0, -r * CELL)
-                    np.setColor(_CLR_FREE)
+                    np.setP(-90)   # rotate card to face +Z (up)
+                    np.setPos(x, y, 0)
+                    if cell == CellType.STATION:
+                        np.setColor(_CLR_STATION)
+                    elif cell == CellType.POD_HOME:
+                        np.setColor(_CLR_POD_HOME)
+                    else:
+                        np.setColor(_CLR_FREE)
 
     def _draw_grid_lines(self, parent, rows, cols):
-        """Draw thin white grid lines on the floor for 3D view."""
+        """Draw thin grid lines on the XY ground plane (Z=0.01)."""
         ls = LineSegs("grid_lines")
         ls.setColor(0.25, 0.25, 0.40, 0.4)
         ls.setThickness(1.0)
 
         min_x = -CELL / 2
         max_x = (cols - 1) * CELL + CELL / 2
-        min_z = -((rows - 1) * CELL + CELL / 2)
-        max_z = CELL / 2
+        min_y = -((rows - 1) * CELL + CELL / 2)
+        max_y = CELL / 2
+        z = 0.01  # slightly above floor to avoid z-fighting
 
-        # Horizontal lines
+        # Lines along X (one per row boundary)
         for r in range(rows + 1):
-            z = CELL / 2 - r * CELL
-            ls.moveTo(min_x, 0.01, z)
-            ls.drawTo(max_x, 0.01, z)
+            y = CELL / 2 - r * CELL
+            ls.moveTo(min_x, y, z)
+            ls.drawTo(max_x, y, z)
 
-        # Vertical lines
+        # Lines along Y (one per column boundary)
         for c in range(cols + 1):
             x = -CELL / 2 + c * CELL
-            ls.moveTo(x, 0.01, max_z)
-            ls.drawTo(x, 0.01, min_z)
+            ls.moveTo(x, max_y, z)
+            ls.drawTo(x, min_y, z)
 
         parent.attachNewNode(ls.create())
 
@@ -423,7 +441,7 @@ class Panda3DVisualizer(BaseVisualizer):
                 np.show()
                 pr, pc = pod.current_position
                 if self._is_3d:
-                    np.setPos(pc * CELL, 0, -pr * CELL + CELL * 0.175)
+                    np.setPos(pc * CELL, -pr * CELL, CELL * 0.175)
                 else:
                     np.setPos(pc * CELL, -0.2, -pr * CELL)
 
@@ -439,9 +457,10 @@ class Panda3DVisualizer(BaseVisualizer):
             lnp = self._agent_labels[aid]
 
             if self._is_3d:
-                anp.setPos(x, 0, z + CELL * 0.225)
-                gnp.setPos(x, 0, z + CELL * 0.275)
-                lnp.setPos(x, 0, z + CELL * 0.55)
+                y = -r * CELL
+                anp.setPos(x, y, CELL * 0.225)
+                gnp.setPos(x, y, CELL * 0.275)
+                lnp.setPos(x, y, CELL * 0.55)
             else:
                 anp.setPos(x, -0.5, z)
                 gnp.setPos(x, -0.4, z)
@@ -462,6 +481,19 @@ class Panda3DVisualizer(BaseVisualizer):
             f"Orders: {completed}/{total}   "
             f"Rate: {rate:.2f}/tick"
         )
+        if self._is_3d and not hasattr(self, "_help_np"):
+            ht = TextNode("help")
+            ht.setTextColor(0.6, 0.6, 0.7, 0.8)
+            ht.setAlign(TextNode.ARight)
+            ht.setShadow(0.04, 0.04)
+            ht.setShadowColor(0, 0, 0, 0.6)
+            ht.setText(
+                "[1] Top  [2] Front  [3] Right  [4] Iso  [R] Reset\n"
+                "Left-drag: Orbit  Right-drag: Pan  Scroll: Zoom"
+            )
+            self._help_np = self._app.aspect2d.attachNewNode(ht)
+            self._help_np.setScale(0.04)
+            self._help_np.setPos(1.3, 0, -0.92)
 
     # ── custom orbit camera (3D only) ────────────────────────────────
 
@@ -499,8 +531,108 @@ class Panda3DVisualizer(BaseVisualizer):
         self._cam_dist = max(2.0, min(200.0, self._cam_dist))
         self._update_orbit_camera()
 
+    def _set_view_preset(self, name):
+        """Snap camera to a preset view angle."""
+        presets = {
+            "top":   (-90.0, 89.0),   # looking straight down
+            "front": (-90.0, 0.1),    # looking from front (-Y)
+            "right": (0.0,   0.1),    # looking from right (+X)
+            "iso":   (-135.0, 35.0),  # isometric
+            "reset": (-135.0, 35.0),  # same as iso + reset pivot
+        }
+        if name in presets:
+            self._cam_heading, self._cam_pitch = presets[name]
+            if name == "reset":
+                ms = getattr(self, "_map_size", None)
+                if ms:
+                    self._cam_pivot = LPoint3f(
+                        (ms[1] - 1) * CELL / 2,
+                        -((ms[0] - 1) * CELL / 2),
+                        0,
+                    )
+            self._update_orbit_camera()
+
+    # ── axis gizmo ────────────────────────────────────────────────────
+
+    def _setup_axis_gizmo(self):
+        """Create a small 3D axis indicator in the lower-left corner."""
+        # Separate scene for the gizmo
+        self._gizmo_root = NodePath("gizmo_root")
+        self._gizmo_pivot = self._gizmo_root.attachNewNode("gizmo_pivot")
+
+        axis_len = 1.0
+        axes = [
+            ("X", (axis_len, 0, 0), (1.0, 0.3, 0.3, 1)),    # red
+            ("Y", (0, axis_len, 0), (0.3, 1.0, 0.3, 1)),    # green
+            ("Z", (0, 0, axis_len), (0.4, 0.5, 1.0, 1)),    # blue
+        ]
+
+        for label, end, colour in axes:
+            # Axis line
+            ls = LineSegs(f"axis_{label}")
+            ls.setColor(*colour)
+            ls.setThickness(2.5)
+            ls.moveTo(0, 0, 0)
+            ls.drawTo(*end)
+            self._gizmo_pivot.attachNewNode(ls.create())
+
+            # Label
+            tn = TextNode(f"lbl_{label}")
+            tn.setText(label)
+            tn.setTextColor(*colour)
+            tn.setAlign(TextNode.ACenter)
+            tnp = self._gizmo_pivot.attachNewNode(tn)
+            tnp.setPos(end[0] * 1.25, end[1] * 1.25, end[2] * 1.25)
+            tnp.setScale(0.35)
+            tnp.setBillboardPointEye()
+
+        # Create a small DisplayRegion in the lower-left
+        dr = self._app.win.makeDisplayRegion(0, 0.18, 0, 0.24)
+        dr.setSort(20)
+        dr.setClearColorActive(True)
+        dr.setClearColor(LVecBase4f(0.06, 0.06, 0.10, 1))
+        dr.setClearDepthActive(True)
+
+        # Gizmo camera — create manually (not via makeCamera)
+        from panda3d.core import Camera
+        lens = PerspectiveLens()
+        lens.setFov(40)
+        lens.setNearFar(0.1, 100)
+
+        cam_node = Camera("gizmo_cam")
+        cam_node.setLens(lens)
+        gizmo_cam_np = self._gizmo_root.attachNewNode(cam_node)
+        gizmo_cam_np.setPos(0, -5, 0)
+        gizmo_cam_np.lookAt(0, 0, 0)
+        dr.setCamera(gizmo_cam_np)
+
+        self._gizmo_cam = gizmo_cam_np
+        self._gizmo_dr = dr
+
+    def _update_gizmo(self):
+        """Sync gizmo rotation with the main camera orientation."""
+        if not hasattr(self, "_gizmo_pivot"):
+            return
+        # The gizmo pivot should rotate to match the main camera's view
+        # We set the gizmo camera to the same orientation as the main camera
+        # but at a fixed distance from origin
+        h_rad = math.radians(self._cam_heading)
+        p_rad = math.radians(self._cam_pitch)
+        d = 5.0
+
+        cos_p = math.cos(p_rad)
+        cx = d * cos_p * math.sin(h_rad)
+        cy = -d * cos_p * math.cos(h_rad)
+        cz = d * math.sin(p_rad)
+
+        self._gizmo_cam.setPos(cx, cy, cz)
+        self._gizmo_cam.lookAt(0, 0, 0)
+
     def _orbit_task(self, task):
         """Per-frame task: reads mouse position delta for orbit/pan."""
+        # Sync gizmo each frame
+        self._update_gizmo()
+
         if not self._app.mouseWatcherNode.hasMouse():
             return task.cont
 
@@ -523,7 +655,7 @@ class Panda3DVisualizer(BaseVisualizer):
             self._update_orbit_camera()
 
         elif self._mouse_btn == 3:
-            # Right-drag → pan (move pivot in camera-local XZ plane)
+            # Right-drag → pan (move pivot in camera-local plane)
             h_rad = math.radians(self._cam_heading)
             speed = self._cam_dist * 0.5
 
