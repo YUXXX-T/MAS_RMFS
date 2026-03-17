@@ -13,6 +13,7 @@
 - [🧩 如何集成自定义算法](#-如何集成自定义算法)
 - [📦 已有算法列表](#-已有算法列表)
 - [🎮 Panda3D 可视化](#-panda3d-可视化)
+- [🧠 强化学习接口](#-强化学习接口)
 
 ---
 
@@ -46,13 +47,26 @@ MAS_RMFS/
 │   ├── TaskAssigner/             # 任务分配器
 │   │   ├── base_task_assigner.py
 │   │   └── GreedyTaskAssigner/
-│   └── PodReturnPlanner/         # 货架归还规划器 (interface)
-│       ├── base_pod_return_planner.py
-│       ├── HomeReturnPlanner/
-│       └── NearestSlotPlanner/
+│   ├── PodReturnPlanner/         # 货架归还规划器
+│   │   ├── base_pod_return_planner.py
+│   │   ├── HomeReturnPlanner/
+│   │   └── NearestSlotPlanner/
+│   ├── ObservationEncoder/       # 🧠 RL 观测编码器
+│   │   ├── base_observation_encoder.py
+│   │   ├── GridObservationEncoder/
+│   │   └── FlatObservationEncoder/
+│   ├── ActionDecoder/            # 🧠 RL 动作解码器
+│   │   ├── base_action_decoder.py
+│   │   └── TaskAssignmentDecoder/
+│   └── RewardFunction/           # 🧠 RL 奖励函数
+│       ├── base_reward_function.py
+│       └── DefaultRewardFunction/
 ├── Visualization/                # 可视化
 │   ├── visualizer.py             # 终端 ASCII / Matplotlib 仪表盘
-│   └── panda3d_visualizer.py     # Panda3D 2D/3D 可视化
+│   ├── panda3d_visualizer.py     # Panda3D 2D/3D 可视化
+│   └── ui.py                     # Qt 统一窗口（嵌入 Panda3D + 图表面板）
+├── Env/                          # 🧠 强化学习环境
+│   └── rmfs_env.py               # PettingZoo ParallelEnv 封装
 └── Debug/
     └── logger.py                 # 日志工具
 ```
@@ -65,6 +79,7 @@ MAS_RMFS/
 | `WorldState` | 维护仿真的全部状态（地图、智能体、货架、订单、任务） |
 | `Engine` | 驱动仿真主循环，按固定顺序调用各策略 |
 | `Policies` | 提供算法接口（抽象基类）和具体实现，通过注册中心按名称查找 |
+| `Env` | PettingZoo 多智能体 RL 环境封装 |
 | `Visualization` | 可选的实时可视化渲染 |
 
 ---
@@ -86,6 +101,9 @@ python main.py --visualize
 
 # 指定自定义配置文件
 python main.py --config path/to/my_config.json
+
+# 🧠 使用 PettingZoo RL 环境
+python -c "from Env.rmfs_env import RMFSEnv; env = RMFSEnv(); print(env.possible_agents)"
 ```
 
 > `--mpl`、`--p3d`、`--visualize` 三者互斥，只能选择其一。
@@ -383,6 +401,113 @@ list_policies(category=None)     # 列出已注册的算法
 |--------|------|---------|
 | `HomeReturnPlanner` | 始终返回货架的原始位置（默认） | — |
 | `NearestSlotPlanner` | 返回距工作站最近的空闲货架位 | — |
+
+---
+
+## 🧠 强化学习接口
+
+MAS-RMFS 提供基于 [PettingZoo](https://pettingzoo.farama.org/) 的多智能体并行环境（`ParallelEnv`），所有组件均可插拔替换。
+
+### 🏗️ 架构
+
+```
+┌─────────────────────────────────────────────┐
+│            RMFSEnv (PettingZoo ParallelEnv)     │
+│                                                 │
+│   reset() → obs_dict, info_dict                 │
+│   step(actions) → obs, rewards, terms, truncs    │
+│                                                 │
+│   ┌───────────────────────────────────────┐ │
+│   │  ObservationEncoder  │ ActionDecoder  │ │
+│   │  RewardFunction     │ SimEngine      │ │
+│   └───────────────────────────────────────┘ │
+└─────────────────────────────────────────────┘
+```
+
+### 🚀 快速开始
+
+```bash
+# 安装依赖
+pip install pettingzoo gymnasium
+```
+
+```python
+from Env.rmfs_env import RMFSEnv
+
+# 默认配置（GridObservationEncoder + TaskAssignmentDecoder + DefaultRewardFunction）
+env = RMFSEnv(max_ticks=500)
+obs, infos = env.reset()
+
+for _ in range(500):
+    # 每个智能体独立决策
+    actions = {agent: env.action_space(agent).sample() for agent in env.agents}
+    obs, rewards, terminations, truncations, infos = env.step(actions)
+    if not env.agents:  # 回合结束
+        break
+```
+
+### 🔧 自定义组件
+
+```python
+from Env.rmfs_env import RMFSEnv
+from Policies.ObservationEncoder import FlatObservationEncoder
+from Policies.RewardFunction import DefaultRewardFunction
+
+env = RMFSEnv(
+    config_path="Config/default_config.json",
+    obs_encoder=FlatObservationEncoder(),      # 1D 向量，适用于 MLP
+    reward_fn=DefaultRewardFunction(max_ticks=1000),
+)
+```
+
+### 📦 可插拔组件一览
+
+| 组件类型 | 实现 | 说明 |
+|---------|------|------|
+| 👁️ 观测编码 | `GridObservationEncoder` | 6 通道网格 `(R,C,6)` + 7 维智能体特征，适用于 CNN |
+| | `FlatObservationEncoder` | 1D 展平向量，适用于 MLP |
+| 🎯 动作解码 | `TaskAssignmentDecoder` | `Discrete(num_pods+1)` — 选择货架或空闲 |
+| 🏆 奖励函数 | `DefaultRewardFunction` | +10/订单, -0.01/tick, +0.5/拾取 |
+
+### 📊 观测空间说明（GridObservationEncoder）
+
+**网格通道** `(rows, cols, 6)`：
+
+| 通道 | 内容 |
+|------|------|
+| 0 | 障碍物 (1=障碍) |
+| 1 | 工作站 (1=工作站) |
+| 2 | 静止货架位置 |
+| 3 | 智能体位置（归一化） |
+| 4 | 搬运中的货架 |
+| 5 | 待处理订单目标热力图 |
+
+**智能体特征** `(7,)`： `[row, col, status, has_path, is_carrying, wait_ticks, tick]` — 均归一化到 [0,1]
+
+### 🎮 动作空间说明（TaskAssignmentDecoder）
+
+`Discrete(num_pods + 1)` — 每个智能体独立选择：
+- **0** = 保持空闲（不执行任何操作）
+- **1…N** = 选择去取对应 ID 的货架（自动创建 PICK → DELIVER → RETURN 任务链）
+
+仅当智能体处于 IDLE 状态时动作才会生效。无效动作（货架不可用、无对应订单）会被安全忽略。
+
+### ➕ 自定义 RL 组件
+
+与现有策略的扩展方式一致：
+
+```python
+# 自定义观测编码器
+from Policies.ObservationEncoder.base_observation_encoder import BaseObservationEncoder
+
+class MyEncoder(BaseObservationEncoder):
+    def observation_space(self, world_state):
+        return gymnasium.spaces.Box(low=0, high=1, shape=(64,))
+
+    def encode(self, world_state, agent_id):
+        # 自定义编码逻辑
+        return np.zeros(64)
+```
 
 ---
 
