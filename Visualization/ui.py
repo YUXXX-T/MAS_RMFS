@@ -575,6 +575,12 @@ class SimulationUI(QMainWindow):
     def _embed_panda(self):
         handle = int(self._panda_container.winId())
         self._viz._parent_window_handle = handle
+        # 传递容器初始物理像素尺寸给 Panda3D（考虑 DPI 缩放）
+        dpr = self._panda_container.devicePixelRatio()
+        self._viz._parent_initial_size = (
+            int(self._panda_container.width() * dpr),
+            int(self._panda_container.height() * dpr),
+        )
         self._panda_embedded = True
 
     def _resize_panda(self):
@@ -582,13 +588,18 @@ class SimulationUI(QMainWindow):
                 or not self._panda_embedded):
             return
         from panda3d.core import WindowProperties
-        w = self._panda_container.width()
-        h = self._panda_container.height()
+        # 使用物理像素（考虑 DPI 缩放）
+        dpr = self._panda_container.devicePixelRatio()
+        w = int(self._panda_container.width() * dpr)
+        h = int(self._panda_container.height() * dpr)
         if w > 0 and h > 0:
             wp = WindowProperties()
             wp.setSize(w, h)
             wp.setOrigin(0, 0)
             self._viz._app.win.requestProperties(wp)
+
+            # 通知 ShowBase 更新宽高比（镜头、aspect2d、pixel2d 等）
+            self._viz._app.adjustWindowAspectRatio(w / h)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -630,7 +641,9 @@ class SimulationUI(QMainWindow):
             if not self._panda_embedded:
                 self._embed_panda()
             self._viz.render(self._engine.world)
-            QTimer.singleShot(100, self._resize_panda)
+            # 多次延迟强制同步尺寸，确保窗口完全填满容器
+            for delay in (50, 200, 500):
+                QTimer.singleShot(delay, self._resize_panda)
 
         self._update_info()
 

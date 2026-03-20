@@ -1,7 +1,7 @@
 {
     "map": {
-        "rows": 10,
-        "cols": 10,
+        "rows": 20,
+        "cols": 20,
         "obstacles": [],
         "stations": [
             {
@@ -12,26 +12,72 @@
             {
                 "id": 2,
                 "row": 0,
-                "col": 5
+                "col": 15
+            },
+            {
+                "id": 3,
+                "row": 19,
+                "col": 4
+            },
+            {
+                "id": 4,
+                "row": 19,
+                "col": 15
             }
         ],
         "pod_zones": [
             {
                 "origin_row": 3,
-                "origin_col": 1,
-                "num_rows": 2,
-                "num_cols": 3
+                "origin_col": 2,
+                "num_rows": 6,
+                "num_cols": 2
             },
             {
-                "origin_row": 7,
+                "origin_row": 11,
+                "origin_col": 2,
+                "num_rows": 6,
+                "num_cols": 2
+            },
+            {
+                "origin_row": 3,
                 "origin_col": 6,
-                "num_rows": 2,
-                "num_cols": 3
+                "num_rows": 6,
+                "num_cols": 2
+            },
+            {
+                "origin_row": 11,
+                "origin_col": 6,
+                "num_rows": 6,
+                "num_cols": 2
+            },
+            {
+                "origin_row": 3,
+                "origin_col": 10,
+                "num_rows": 6,
+                "num_cols": 2
+            },
+            {
+                "origin_row": 11,
+                "origin_col": 10,
+                "num_rows": 6,
+                "num_cols": 2
+            },
+            {
+                "origin_row": 3,
+                "origin_col": 14,
+                "num_rows": 6,
+                "num_cols": 2
+            },
+            {
+                "origin_row": 11,
+                "origin_col": 14,
+                "num_rows": 6,
+                "num_cols": 2
             }
         ]
     },
     "robots": {
-        "num_robots": 3,
+        "num_robots": 4,
         "starts": [
             [
                 0,
@@ -44,18 +90,22 @@
             [
                 0,
                 2
+            ],
+            [
+                19,
+                2
             ]
         ],
         "speed": 1
     },
     "simulation": {
-        "order_interval": 5,
+        "order_interval": 2,
         "max_items_per_order": 2,
         "pickup_duration": 2,
         "dropoff_duration": 2,
         "station_process_duration": 5,
         "tick_delay": 0.5,
-        "p3d_view_mode": "2d",
+        "p3d_view_mode": "3d",
         "p3d_use_gpu": false,
         "night_mode": false,
         "log_level": "INFO",
@@ -73,7 +123,7 @@
             "name": "PrioritizedPathPlanner",
             "params": {
                 "max_horizon": 100,
-                "goal_reserve": 10
+                "goal_reserve": 6
             }
         },
         "pod_return_planner": "HomeReturnPlanner"

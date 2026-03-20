@@ -109,6 +109,7 @@ def _make_box(name: str, sx: float, sy: float, sz: float) -> NodePath:
     sx = size along X, sy = size along Y, sz = size along Z (up).
     """
     root = NodePath(name)
+    root.setTwoSided(True)  # render both sides so the box looks solid
     hx, hy, hz = sx / 2, sy / 2, sz / 2
 
     # top (+Z) — card lies flat facing up
@@ -217,7 +218,14 @@ class Panda3DVisualizer(BaseVisualizer):
         if self._parent_window_handle is not None:
             wp.setParentWindow(self._parent_window_handle)
             wp.setOrigin(0, 0)
-        wp.setSize(1024, 768) if is_3d else wp.setSize(900, 900)
+            # 使用 Qt 容器的实际尺寸
+            init_sz = getattr(self, "_parent_initial_size", None)
+            if init_sz and init_sz[0] > 0 and init_sz[1] > 0:
+                wp.setSize(init_sz[0], init_sz[1])
+            else:
+                wp.setSize(1024, 768)
+        else:
+            wp.setSize(1024, 768) if is_3d else wp.setSize(900, 900)
 
         if self._parent_window_handle is not None:
             self._app.openMainWindow(props=wp)
