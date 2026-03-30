@@ -76,6 +76,7 @@ def main():
     order_generator = OrderGeneratorCls(
         order_interval=config.simulation.order_interval,
         max_items_per_order=config.simulation.max_items_per_order,
+        fixed_order_size=config.simulation.fixed_order_size,
         **og_params,
     )
     task_assigner = TaskAssignerCls(**ta_params)

@@ -53,11 +53,14 @@ class WorldState:
         self.order_state = OrderState()
         self.task_state = TaskState()
 
-        # 从地图的 pod_home_positions 初始化货架
+        # 通过 PodInitializer 策略初始化货架
+        from Policies.policy_registry import get_policy
         self.pod_state = PodState()
-        for idx, pos in enumerate(self.map_state.pod_home_positions):
-            pod = Pod(pod_id=idx, home_position=pos)
-            self.pod_state.add_pod(pod)
+        pi_name = config.policies.pod_initializer[0]
+        pi_params = config.policies.pod_initializer[1] if len(config.policies.pod_initializer) > 1 else {}
+        PodInitializerCls = get_policy("pod_initializer", pi_name)
+        pod_initializer = PodInitializerCls(**pi_params)
+        pod_initializer.initialize_pods(self)
 
     def advance_tick(self):
         """递增仿真 tick 计数器。"""

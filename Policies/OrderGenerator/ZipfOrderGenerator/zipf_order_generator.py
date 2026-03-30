@@ -42,10 +42,12 @@ class ZipfOrderGenerator(BaseOrderGenerator):
         order_interval: int = 5,
         max_items_per_order: int = 2,
         zipf_param: float = 1.5,
+        fixed_order_size: bool = False,
     ):
         self.order_interval = order_interval
         self.max_items_per_order = max_items_per_order
         self.zipf_param = zipf_param
+        self.fixed_order_size = fixed_order_size
 
     def _zipf_weights(self, n: int) -> np.ndarray:
         """
@@ -79,10 +81,13 @@ class ZipfOrderGenerator(BaseOrderGenerator):
             return orders
 
         # Number of items for this order
-        num_items = min(
-            random.randint(1, self.max_items_per_order),
-            len(available_pods),
-        )
+        if self.fixed_order_size:
+            num_items = min(self.max_items_per_order, len(available_pods))
+        else:
+            num_items = min(
+                random.randint(1, self.max_items_per_order),
+                len(available_pods),
+            )
 
         # Compute Zipf weights over available pods
         weights = self._zipf_weights(len(available_pods))

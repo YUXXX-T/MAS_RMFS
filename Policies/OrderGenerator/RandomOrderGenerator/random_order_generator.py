@@ -25,9 +25,11 @@ class RandomOrderGenerator(BaseOrderGenerator):
         Maximum number of pods per order.
     """
 
-    def __init__(self, order_interval: int = 5, max_items_per_order: int = 2):
+    def __init__(self, order_interval: int = 5, max_items_per_order: int = 2,
+                 fixed_order_size: bool = False):
         self.order_interval = order_interval
         self.max_items_per_order = max_items_per_order
+        self.fixed_order_size = fixed_order_size
 
     def generate(self, world_state) -> List[Order]:
         """Generate random orders every `order_interval` ticks."""
@@ -48,10 +50,13 @@ class RandomOrderGenerator(BaseOrderGenerator):
             return orders
 
         # Pick random pods for this order
-        num_items = min(
-            random.randint(1, self.max_items_per_order),
-            len(available_pods),
-        )
+        if self.fixed_order_size:
+            num_items = min(self.max_items_per_order, len(available_pods))
+        else:
+            num_items = min(
+                random.randint(1, self.max_items_per_order),
+                len(available_pods),
+            )
         chosen_pods = random.sample(available_pods, num_items)
         chosen_pod_ids = [p.pod_id for p in chosen_pods]
 

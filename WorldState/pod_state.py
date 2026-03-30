@@ -23,14 +23,21 @@ class Pod:
         Whether the pod is currently being carried by a robot.
     carried_by : int or None
         Agent ID of the robot carrying this pod.
+    pod_type : str
+        Pod 类型标识（如 "A", "B", "C"），初始化后不变。
+    skus : list[str]
+        该 Pod 持有的 SKU 标识符列表。
     """
 
-    def __init__(self, pod_id: int, home_position: Tuple[int, int]):
+    def __init__(self, pod_id: int, home_position: Tuple[int, int],
+                 pod_type: str = "", skus: Optional[List[str]] = None):
         self.pod_id = pod_id
         self.home_position = home_position
         self.current_position: Tuple[int, int] = home_position
         self.is_carried: bool = False
         self.carried_by: Optional[int] = None
+        self.pod_type: str = pod_type
+        self.skus: List[str] = skus if skus is not None else []
 
     @property
     def is_at_home(self) -> bool:
@@ -50,7 +57,8 @@ class Pod:
 
     def __repr__(self) -> str:
         state = "carried" if self.is_carried else "stationary"
-        return f"Pod(id={self.pod_id}, pos={self.current_position}, {state})"
+        return (f"Pod(id={self.pod_id}, type={self.pod_type}, "
+                f"pos={self.current_position}, {state}, skus={len(self.skus)})")
 
 
 class PodState:

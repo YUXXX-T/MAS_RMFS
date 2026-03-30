@@ -98,6 +98,11 @@
         ],
         "speed": 1
     },
+    "pods": {
+        "pod_types": ["A", "B", "C"],
+        "skus_per_pod": 3,
+        "sku_pool_size_per_type": 10
+    },
     "simulation": {
         "order_interval": 2,
         "max_items_per_order": 2,
@@ -109,7 +114,9 @@
         "p3d_use_gpu": false,
         "night_mode": false,
         "log_level": "INFO",
-        "log_file": null
+        "log_file": null,
+        "fixed_order_size": false,
+        "task_execution_mode": "parallel"
     },
     "policies": {
         "order_generator": {
@@ -126,6 +133,7 @@
                 "goal_reserve": 6
             }
         },
-        "pod_return_planner": "HomeReturnPlanner"
+        "pod_return_planner": "HomeReturnPlanner",
+        "pod_initializer": "DefaultPodInitializer"
     }
 }

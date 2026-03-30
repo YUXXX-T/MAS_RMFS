@@ -50,6 +50,14 @@ class RobotConfig:
 
 
 @dataclass
+class PodsConfig:
+    """Pod 初始化相关配置。"""
+    pod_types: List[str] = field(default_factory=lambda: ["A", "B", "C"])
+    skus_per_pod: int = 3
+    sku_pool_size_per_type: int = 10
+
+
+@dataclass
 class PolicyConfig:
     """
     Configuration for which algorithm to use for each policy.
@@ -68,6 +76,7 @@ class PolicyConfig:
     task_assigner: Tuple[str, Dict[str, Any]] = ("GreedyTaskAssigner", {})
     path_planner: Tuple[str, Dict[str, Any]] = ("AStarPathPlanner", {})
     pod_return_planner: Tuple[str, Dict[str, Any]] = ("HomeReturnPlanner", {})
+    pod_initializer: Tuple[str, Dict[str, Any]] = ("DefaultPodInitializer", {})
 
 
 @dataclass
@@ -84,6 +93,8 @@ class SimulationParams:
     night_mode: bool = True           # True = dark theme, False = light/white theme
     log_level: str = "INFO"
     log_file: Optional[str] = None
+    fixed_order_size: bool = False    # True = 每个订单固定 max_items_per_order 个 pod
+    task_execution_mode: str = "parallel"  # "parallel" 或 "serial"
 
 
 @dataclass
@@ -93,6 +104,7 @@ class SimulationConfig:
     robots: RobotConfig = field(default_factory=lambda: RobotConfig(1, [[0, 0]]))
     simulation: SimulationParams = field(default_factory=SimulationParams)
     policies: PolicyConfig = field(default_factory=PolicyConfig)
+    pods: PodsConfig = field(default_factory=PodsConfig)
 
 
 def load_config(path: str) -> SimulationConfig:
@@ -159,6 +171,8 @@ def load_config(path: str) -> SimulationConfig:
         night_mode=sim_raw.get("night_mode", True),
         log_level=sim_raw.get("log_level", "INFO"),
         log_file=sim_raw.get("log_file", None),
+        fixed_order_size=sim_raw.get("fixed_order_size", False),
+        task_execution_mode=sim_raw.get("task_execution_mode", "parallel"),
     )
 
     # --- Parse policies ---
@@ -181,9 +195,20 @@ def load_config(path: str) -> SimulationConfig:
             pol_raw.get("path_planner"), "AStarPathPlanner"),
         pod_return_planner=_parse_policy_entry(
             pol_raw.get("pod_return_planner"), "HomeReturnPlanner"),
+        pod_initializer=_parse_policy_entry(
+            pol_raw.get("pod_initializer"), "DefaultPodInitializer"),
+    )
+
+    # --- Parse pods config ---
+    pods_raw = raw.get("pods", {})
+    pods_config = PodsConfig(
+        pod_types=pods_raw.get("pod_types", ["A", "B", "C"]),
+        skus_per_pod=pods_raw.get("skus_per_pod", 3),
+        sku_pool_size_per_type=pods_raw.get("sku_pool_size_per_type", 10),
     )
 
     return SimulationConfig(
         map=map_config, robots=robot_config,
         simulation=sim_params, policies=policy_config,
+        pods=pods_config,
     )
