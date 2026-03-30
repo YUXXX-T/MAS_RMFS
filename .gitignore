@@ -1,6 +1,7 @@
 # 忽略 Python 运行产生的缓存文件夹
 __pycache__/
-./implement_plan.md
-./claude_prompt.md
-./pod_initialization_prompt.md
-./MAS_RMFS.7z
+
+implement_plan.md
+claude_prompt.md
+pod_initialization_prompt.md
+MAS_RMFS.7z
