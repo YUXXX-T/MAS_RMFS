@@ -370,6 +370,7 @@ list_policies(category=None)     # 列出已注册的算法
 |--------|------|---------|
 | `AStarPathPlanner` | 单智能体 A* 算法 | — |
 | `PrioritizedPathPlanner` | 优先级规划（时空 A* + 预留表） | `max_horizon`（搜索深度，默认 100）, `goal_reserve`（目标占用缓冲，默认 10） |
+| `MAPFGPTPathPlanner` | MAPF-GPT 联合决策适配器（每 tick 预测一步，失败时回退 A*） | `mapf_gpt_root`, `model`（2M/6M/85M）, `device`, `use_sampling`, `min_joint_agents`, `avoid_agents` |
 
 ### 📋 任务分配器（TaskAssigner）
 
@@ -383,6 +384,30 @@ list_policies(category=None)     # 列出已注册的算法
 |--------|------|---------|
 | `HomeReturnPlanner` | 始终返回货架的原始位置（默认） | — |
 | `NearestSlotPlanner` | 返回距工作站最近的空闲货架位 | — |
+
+### 🔌 使用 MAPF-GPT 作为路径规划器
+
+在配置中将 `path_planner` 切换为 `MAPFGPTPathPlanner`：
+
+```json
+{
+    "policies": {
+        "path_planner": {
+            "name": "MAPFGPTPathPlanner",
+            "params": {
+                "mapf_gpt_root": "MAPF-GPT-main",
+                "model": "2M",
+                "device": "cpu",
+                "min_joint_agents": 2
+            }
+        }
+    }
+}
+```
+
+说明：
+- 若 MAPF-GPT 依赖或权重加载失败，系统会自动回退到 `AStarPathPlanner`，仿真不会中断。
+- 该适配器采用“每个 tick 预测一步”的集成方式，以兼容 MAS_RMFS 的逐智能体接口。
 
 ---
 
@@ -432,7 +457,7 @@ list_policies(category=None)     # 列出已注册的算法
 
 🔧 **超大规模下——多进程解耦架构**
 ```
-如果仿真和渲染会互相拖慢，可以用 ZeroMQ 做进程间通信：
+1. 如果仿真和渲染会互相拖慢，可以用 ZeroMQ 做进程间通信：
 ┌──────────────────┐    ZeroMQ (TCP/IPC)    ┌────────────────────┐
 │ Python 仿真进程   │ ────────────────────▶ │ 渲染进程            │
 │ (event_engine)   │    序列化 world_state   │ (Panda3D / Godot)  │
@@ -441,6 +466,9 @@ list_policies(category=None)     # 列出已注册的算法
 └──────────────────┘                        └─────────────────────┘
 
 渲染端未来可以换成 任何引擎（Panda3D、Godot、甚至 C++ 自定义），只要它能读 ZeroMQ 消息。
+
+2. 全局 碰撞检测(Collision Detection)
+
 ```
 🛒 **Inventory model and Inventory lookup policy**
 ```

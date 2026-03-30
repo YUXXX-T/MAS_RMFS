@@ -70,10 +70,12 @@
         },
         "task_assigner": "GreedyTaskAssigner",
         "path_planner": {
-            "name": "PrioritizedPathPlanner",
+            "name": "MAPFGPTPathPlanner",
             "params": {
-                "max_horizon": 100,
-                "goal_reserve": 10
+                "mapf_gpt_root": "MAPF-GPT-main",
+                "model": "2M",
+                "device": "cuda",
+                "min_joint_agents": 2
             }
         },
         "pod_return_planner": "HomeReturnPlanner"
