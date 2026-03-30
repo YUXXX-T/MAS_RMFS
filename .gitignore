@@ -1,5 +1,6 @@
 # 忽略 Python 运行产生的缓存文件夹
 __pycache__/
+.vscode
 
 implement_plan.md
 claude_prompt.md
