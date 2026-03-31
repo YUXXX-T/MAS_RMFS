@@ -2,10 +2,14 @@
 OrderState Module
 =================
 Represents customer orders in the fulfillment system.
+
+订单状态模块
+=================
+表示履行系统中的客户订单。
 """
 
 from enum import Enum, auto
-from typing import List, Optional
+from typing import List, Dict, Optional
 
 
 class OrderStatus(Enum):
@@ -17,14 +21,20 @@ class OrderStatus(Enum):
 
 class Order:
     """
-    A customer order requesting items (pods) to be delivered to a station.
+    A customer order requesting items (SKUs) to be delivered to a station.
+
+    订单模型：记录 SKU 需求（需要哪些 SKU 各多少件），
+    由 PodRetriever 策略将 SKU 需求转化为具体的 pod 列表。
 
     属性
     ----------
     order_id : int
         Unique order identifier.
+    sku_demands : dict[str, int]
+        SKU 需求映射，键为 SKU 标识符，值为所需数量。
+        例如 {"A_SKU_0": 3, "B_SKU_2": 1}
     pod_ids : list[int]
-        IDs of pods that need to be delivered for this order.
+        由 PodRetriever 填充的 pod ID 列表。
     station_id : int
         Target station where pods should be delivered.
     status : OrderStatus
@@ -37,10 +47,12 @@ class Order:
 
     _next_id: int = 0
 
-    def __init__(self, pod_ids: List[int], station_id: int, created_at: int = 0):
+    def __init__(self, sku_demands: Dict[str, int], station_id: int,
+                 created_at: int = 0):
         self.order_id = Order._next_id
         Order._next_id += 1
-        self.pod_ids: List[int] = pod_ids
+        self.sku_demands: Dict[str, int] = sku_demands
+        self.pod_ids: List[int] = []  # 由 PodRetriever 填充
         self.station_id: int = station_id
         self.status: OrderStatus = OrderStatus.PENDING
         self.created_at: int = created_at
@@ -51,7 +63,7 @@ class Order:
     @property
     def is_fully_delivered(self) -> bool:
         """Check if all pods have been delivered."""
-        return set(self.delivered_pod_ids) >= set(self.pod_ids)
+        return len(self.pod_ids) > 0 and set(self.delivered_pod_ids) >= set(self.pod_ids)
 
     def mark_pod_delivered(self, pod_id: int):
         """Record that a pod has been delivered for this order."""
@@ -60,8 +72,9 @@ class Order:
 
     def __repr__(self) -> str:
         return (
-            f"Order(id={self.order_id}, pods={self.pod_ids}, "
-            f"station={self.station_id}, status={self.status.name})"
+            f"Order(id={self.order_id}, sku_demands={self.sku_demands}, "
+            f"pods={self.pod_ids}, station={self.station_id}, "
+            f"status={self.status.name})"
         )
 
 

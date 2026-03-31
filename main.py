@@ -62,29 +62,35 @@ def main():
     ta_name, ta_params = config.policies.task_assigner
     pp_name, pp_params = config.policies.path_planner
     rp_name, rp_params = config.policies.pod_return_planner
+    pr_name, pr_params = config.policies.pod_retriever
 
     OrderGeneratorCls = get_policy("order_generator", og_name)
     TaskAssignerCls = get_policy("task_assigner", ta_name)
     PathPlannerCls = get_policy("path_planner", pp_name)
     PodReturnPlannerCls = get_policy("pod_return_planner", rp_name)
+    PodRetrieverCls = get_policy("pod_retriever", pr_name)
 
     logger.info(f"Policies: order_generator={og_name}, "
                 f"task_assigner={ta_name}, "
                 f"path_planner={pp_name}, "
-                f"pod_return_planner={rp_name}")
+                f"pod_return_planner={rp_name}, "
+                f"pod_retriever={pr_name}")
 
     order_generator = OrderGeneratorCls(
         order_interval=config.simulation.order_interval,
         max_items_per_order=config.simulation.max_items_per_order,
         fixed_order_size=config.simulation.fixed_order_size,
+        max_items_per_sku=config.simulation.max_items_per_sku,
         **og_params,
     )
     task_assigner = TaskAssignerCls(**ta_params)
     path_planner = PathPlannerCls(**pp_params)
     pod_return_planner = PodReturnPlannerCls(**rp_params)
+    pod_retriever = PodRetrieverCls(**pr_params)
 
-    # 将归还规划器注入任务分配器
+    # 将归还规划器和 Pod 检索器注入任务分配器
     task_assigner.pod_return_planner = pod_return_planner
+    task_assigner.pod_retriever = pod_retriever
 
     # --- 可选的可视化器 ---
     if args.mpl:

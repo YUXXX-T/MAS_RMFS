@@ -25,19 +25,27 @@ class Pod:
         Agent ID of the robot carrying this pod.
     pod_type : str
         Pod 类型标识（如 "A", "B", "C"），初始化后不变。
-    skus : list[str]
-        该 Pod 持有的 SKU 标识符列表。
+    sku_inventory : dict[str, int]
+        该 Pod 持有的 SKU 库存，键为 SKU 标识符，值为物品数量。
+    extra_attrs : dict
+        外部注入的自定义属性字典。
     """
 
     def __init__(self, pod_id: int, home_position: Tuple[int, int],
-                 pod_type: str = "", skus: Optional[List[str]] = None):
+                 pod_type: str = "",
+                 sku_inventory: Optional[Dict[str, int]] = None,
+                 **kwargs):
         self.pod_id = pod_id
         self.home_position = home_position
         self.current_position: Tuple[int, int] = home_position
         self.is_carried: bool = False
         self.carried_by: Optional[int] = None
         self.pod_type: str = pod_type
-        self.skus: List[str] = skus if skus is not None else []
+        self.sku_inventory: Dict[str, int] = sku_inventory if sku_inventory is not None else {}
+        # 外部注入的自定义属性 / Extra attributes injected externally
+        self.extra_attrs: Dict = dict(kwargs)
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
     @property
     def is_at_home(self) -> bool:
@@ -58,7 +66,8 @@ class Pod:
     def __repr__(self) -> str:
         state = "carried" if self.is_carried else "stationary"
         return (f"Pod(id={self.pod_id}, type={self.pod_type}, "
-                f"pos={self.current_position}, {state}, skus={len(self.skus)})")
+                f"pos={self.current_position}, {state}, "
+                f"inventory={len(self.sku_inventory)} SKUs)")
 
 
 class PodState:

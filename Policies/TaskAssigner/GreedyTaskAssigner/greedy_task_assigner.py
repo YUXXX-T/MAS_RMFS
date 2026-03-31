@@ -50,7 +50,15 @@ class GreedyTaskAssigner(BaseTaskAssigner):
         """
         Assign pending orders to idle agents.
         根据 task_execution_mode 选择并行或串行模式分配任务。
+        在分配前，先调用 PodRetriever 将 SKU 需求转化为 pod 列表。
         """
+        # 先对所有待处理订单调用 PodRetriever 填充 pod_ids
+        pending_orders = world_state.order_state.get_pending_orders()
+        for order in pending_orders:
+            if not order.pod_ids and self.pod_retriever is not None:
+                retrieved_ids = self.pod_retriever.retrieve(order, world_state)
+                order.pod_ids = retrieved_ids
+
         mode = world_state.config.simulation.task_execution_mode
         if mode == "serial":
             return self._assign_serial(world_state)

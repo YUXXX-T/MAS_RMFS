@@ -110,7 +110,7 @@ class SimulationEngine:
             self.world.order_state.add_order(order)
             self.logger.info(
                 f"[Tick {tick}] New Order #{order.order_id}: "
-                f"pods={order.pod_ids} -> station {order.station_id}"
+                f"sku_demands={order.sku_demands} -> station {order.station_id}"
             )
 
         # --- 步骤 2：分配任务 ---
@@ -314,6 +314,12 @@ class SimulationEngine:
                     )
                     order = self.world.order_state.orders.get(active_task.order_id)
                     if order:
+                        # 扣减 pod 中对应 SKU 的数量 / Deduct SKU quantities
+                        for sku, demand in order.sku_demands.items():
+                            if sku in pod.sku_inventory:
+                                pod.sku_inventory[sku] = max(
+                                    0, pod.sku_inventory[sku] - demand
+                                )
                         order.mark_pod_delivered(active_task.pod_id)
 
                 active_task.status = TaskStatus.COMPLETED

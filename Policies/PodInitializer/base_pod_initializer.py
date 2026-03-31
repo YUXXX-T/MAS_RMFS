@@ -30,10 +30,10 @@ class BasePodInitializer(ABC):
     """
 
     @abstractmethod
-    def initialize_pods(self, world_state: "WorldState") -> None:
+    def initialize_pods(self, world_state: "WorldState", *args, **kwargs) -> None:
         """
         根据 map_state 中的 pod_zones 和 config 中的参数，
-        初始化所有 Pod 的 pod_type 和 skus 属性，
+        初始化所有 Pod 的 pod_type 和 sku_inventory 属性，
         并将 Pod 对象注册到 world_state.pod_state 中。
 
         该方法在仿真开始前调用一次。
@@ -42,5 +42,7 @@ class BasePodInitializer(ABC):
         ----------
         world_state : WorldState
             当前仿真状态（包含 map_state, pod_state, config 等）。
+        *args, **kwargs :
+            额外参数，可由外部调用者传入以注入自定义属性到 Pod 中。
         """
         ...

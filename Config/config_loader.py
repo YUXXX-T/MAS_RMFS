@@ -55,6 +55,7 @@ class PodsConfig:
     pod_types: List[str] = field(default_factory=lambda: ["A", "B", "C"])
     skus_per_pod: int = 3
     sku_pool_size_per_type: int = 10
+    items_per_sku: int = 20  # 每个 Pod 初始化时每种 SKU 的物品数量
 
 
 @dataclass
@@ -77,6 +78,7 @@ class PolicyConfig:
     path_planner: Tuple[str, Dict[str, Any]] = ("AStarPathPlanner", {})
     pod_return_planner: Tuple[str, Dict[str, Any]] = ("HomeReturnPlanner", {})
     pod_initializer: Tuple[str, Dict[str, Any]] = ("DefaultPodInitializer", {})
+    pod_retriever: Tuple[str, Dict[str, Any]] = ("DefaultPodRetriever", {})
 
 
 @dataclass
@@ -95,6 +97,7 @@ class SimulationParams:
     log_file: Optional[str] = None
     fixed_order_size: bool = False    # True = 每个订单固定 max_items_per_order 个 pod
     task_execution_mode: str = "parallel"  # "parallel" 或 "serial"
+    max_items_per_sku: int = 5        # 订单中每种 SKU 需求的物品数量上限
 
 
 @dataclass
@@ -173,6 +176,7 @@ def load_config(path: str) -> SimulationConfig:
         log_file=sim_raw.get("log_file", None),
         fixed_order_size=sim_raw.get("fixed_order_size", False),
         task_execution_mode=sim_raw.get("task_execution_mode", "parallel"),
+        max_items_per_sku=sim_raw.get("max_items_per_sku", 5),
     )
 
     # --- Parse policies ---
@@ -197,6 +201,8 @@ def load_config(path: str) -> SimulationConfig:
             pol_raw.get("pod_return_planner"), "HomeReturnPlanner"),
         pod_initializer=_parse_policy_entry(
             pol_raw.get("pod_initializer"), "DefaultPodInitializer"),
+        pod_retriever=_parse_policy_entry(
+            pol_raw.get("pod_retriever"), "DefaultPodRetriever"),
     )
 
     # --- Parse pods config ---
@@ -205,6 +211,7 @@ def load_config(path: str) -> SimulationConfig:
         pod_types=pods_raw.get("pod_types", ["A", "B", "C"]),
         skus_per_pod=pods_raw.get("skus_per_pod", 3),
         sku_pool_size_per_type=pods_raw.get("sku_pool_size_per_type", 10),
+        items_per_sku=pods_raw.get("items_per_sku", 20),
     )
 
     return SimulationConfig(

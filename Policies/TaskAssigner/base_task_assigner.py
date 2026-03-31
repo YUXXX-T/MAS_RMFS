@@ -28,6 +28,7 @@ class BaseTaskAssigner(ABC):
 
     def __init__(self):
         self.pod_return_planner = None  # injected by main.py
+        self.pod_retriever = None       # injected by main.py
 
     @abstractmethod
     def assign(self, world_state: "WorldState") -> List["Task"]:
