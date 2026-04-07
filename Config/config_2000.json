@@ -1,0 +1,134 @@
+{
+    "map": {
+        "rows": 200,
+        "cols": 200,
+        "obstacles": [],
+        "stations": [
+            {"id": 1, "row": 0, "col": 10},
+            {"id": 2, "row": 0, "col": 30},
+            {"id": 3, "row": 0, "col": 50},
+            {"id": 4, "row": 0, "col": 70},
+            {"id": 5, "row": 0, "col": 90},
+            {"id": 6, "row": 99, "col": 0},
+            {"id": 7, "row": 99, "col": 40},
+            {"id": 8, "row": 99, "col": 80},
+            {"id": 9, "row": 99, "col": 120},
+            {"id": 10, "row": 99, "col": 160},
+            {"id": 11, "row": 199, "col": 10},
+            {"id": 12, "row": 199, "col": 30},
+            {"id": 13, "row": 199, "col": 50},
+            {"id": 14, "row": 199, "col": 70},
+            {"id": 15, "row": 199, "col": 90},
+            {"id": 16, "row": 0, "col": 110},
+            {"id": 17, "row": 0, "col": 130},
+            {"id": 18, "row": 0, "col": 150},
+            {"id": 19, "row": 199, "col": 110},
+            {"id": 20, "row": 199, "col": 130}
+        ],
+        "pod_zones": [
+            {"origin_row": 3,  "origin_col": 2,  "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 8,  "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 14, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 20, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 26, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 32, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 38, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 44, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 50, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 56, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 62, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 68, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 74, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 80, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 86, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 3,  "origin_col": 92, "num_rows": 10, "num_cols": 4},
+
+            {"origin_row": 15, "origin_col": 2,  "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 8,  "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 14, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 20, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 26, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 32, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 38, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 44, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 50, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 56, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 62, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 68, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 74, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 80, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 86, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 15, "origin_col": 92, "num_rows": 10, "num_cols": 4},
+
+            {"origin_row": 27, "origin_col": 2,  "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 8,  "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 14, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 20, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 26, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 32, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 38, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 44, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 50, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 56, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 62, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 68, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 74, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 80, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 86, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 27, "origin_col": 92, "num_rows": 10, "num_cols": 4},
+
+            {"origin_row": 39, "origin_col": 2,  "num_rows": 10, "num_cols": 4},
+            {"origin_row": 39, "origin_col": 8,  "num_rows": 10, "num_cols": 4},
+            {"origin_row": 39, "origin_col": 14, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 39, "origin_col": 20, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 39, "origin_col": 26, "num_rows": 10, "num_cols": 4},
+            {"origin_row": 39, "origin_col": 32, "num_rows": 10, "num_cols": 4}
+        ]
+    },
+    "robots": {
+        "num_robots": 2000,
+        "starts": [],
+        "speed": 1
+    },
+    "pods": {
+        "pod_types": ["A", "B", "C"],
+        "skus_per_pod": 3,
+        "sku_pool_size_per_type": 50,
+        "items_per_sku": 100
+    },
+    "simulation": {
+        "order_interval": 1,
+        "max_items_per_order": 3,
+        "pickup_duration": 2,
+        "dropoff_duration": 2,
+        "station_process_duration": 5,
+        "tick_delay": 0,
+        "p3d_view_mode": "2d",
+        "p3d_use_gpu": true,
+        "night_mode": true,
+        "log_level": "WARNING",
+        "log_file": null,
+        "fixed_order_size": false,
+        "task_execution_mode": "parallel",
+        "max_items_per_sku": 3
+    },
+    "policies": {
+        "order_generator": {
+            "name": "ZipfOrderGenerator",
+            "params": {
+                "zipf_param": 1.5
+            }
+        },
+        "task_assigner": "GreedyTaskAssigner",
+        "path_planner": {
+            "name": "PrioritizedPathPlanner",
+            "params": {
+                "max_horizon": 100,
+                "goal_reserve": 6
+            }
+        },
+        "pod_return_planner": "HomeReturnPlanner",
+        "pod_initializer": "DefaultPodInitializer",
+        "pod_retriever": "DefaultPodRetriever"
+    }
+}

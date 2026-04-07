@@ -229,24 +229,29 @@ class SimulationEngine:
 
         # --- Oncoming (head-on / swap) conflicts ---
         # Two agents swap positions: A was at X and moved to Y while
-        # B was at Y and moved to X.  This means they crossed the same
-        # edge in opposite directions during this tick.
-        agents = self.world.agents
-        for i in range(len(agents)):
-            for j in range(i + 1, len(agents)):
-                a, b = agents[i], agents[j]
-                a_prev = prev_positions[a.agent_id]
-                b_prev = prev_positions[b.agent_id]
-                # Check if they swapped (and actually moved)
-                if (
-                    a.position == b_prev
-                    and b.position == a_prev
-                    and a_prev != a.position  # A actually moved
-                ):
+        # B was at Y and moved to X.  Use O(n) reverse index instead of O(n²).
+        prev_pos_to_agent: dict[tuple, object] = {}
+        for agent in self.world.agents:
+            prev_pos_to_agent[prev_positions[agent.agent_id]] = agent
+
+        checked = set()  # avoid reporting same pair twice
+        for agent in self.world.agents:
+            a_prev = prev_positions[agent.agent_id]
+            if agent.position == a_prev:
+                continue  # didn't move
+            other = prev_pos_to_agent.get(agent.position)
+            if other is None:
+                continue
+            b_prev = prev_positions[other.agent_id]
+            if other.position == a_prev and b_prev == agent.position:
+                pair = (min(agent.agent_id, other.agent_id),
+                        max(agent.agent_id, other.agent_id))
+                if pair not in checked:
+                    checked.add(pair)
                     self.logger.warning(
                         f"[Tick {tick}] ONCOMING CONFLICT: "
-                        f"Agent #{a.agent_id} ({a_prev}->{a.position}) and "
-                        f"Agent #{b.agent_id} ({b_prev}->{b.position}) "
+                        f"Agent #{agent.agent_id} ({a_prev}->{agent.position}) and "
+                        f"Agent #{other.agent_id} ({b_prev}->{other.position}) "
                         f"swapped positions (head-on collision)"
                     )
 

@@ -29,10 +29,10 @@ def main():
     parser.add_argument(
         "--config",
         type=str,
-        default=os.path.join(os.path.dirname(__file__), "Config", "default_config.json"),
+        default=os.path.join(os.path.dirname(__file__), "Config", "config_2000.json"),
         help="JSON 配置文件路径。",
     )
-
+    # default=os.path.join(os.path.dirname(__file__), "Config", "default_config.json"),
     viz_group = parser.add_mutually_exclusive_group()
     viz_group.add_argument(
         "--visualize",

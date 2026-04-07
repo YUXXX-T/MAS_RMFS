@@ -115,7 +115,7 @@
         "dropoff_duration": 2,
         "station_process_duration": 5,
         "tick_delay": 0.5,
-        "p3d_view_mode": "2d",
+        "p3d_view_mode": "3d",
         "p3d_use_gpu": false,
         "night_mode": false,
         "log_level": "INFO",

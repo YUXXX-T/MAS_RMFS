@@ -4,10 +4,11 @@
 聚合所有仿真状态组件的门面。
 """
 
+import random
 from typing import List, Tuple
 
 from Config.config_loader import SimulationConfig
-from WorldState.map_state import MapState
+from WorldState.map_state import MapState, CellType
 from WorldState.agent_state import AgentState
 from WorldState.order_state import OrderState
 from WorldState.task_state import TaskState
@@ -44,10 +45,40 @@ class WorldState:
         self.map_state = MapState(config.map)
 
         # 在起始位置初始化智能体
+        # 当 starts 列表不够时，自动在 FREE 格子上分散放置
         self.agents: List[AgentState] = []
-        for i in range(config.robots.num_robots):
-            start = config.robots.starts[i] if i < len(config.robots.starts) else (0, 0)
-            self.agents.append(AgentState(agent_id=i, start_position=start))
+        explicit_starts = config.robots.starts
+        num_robots = config.robots.num_robots
+
+        if len(explicit_starts) >= num_robots:
+            # starts 列表足够，直接使用
+            for i in range(num_robots):
+                self.agents.append(AgentState(agent_id=i, start_position=explicit_starts[i]))
+        else:
+            # 收集所有 FREE 格子，用于分配缺失的起始位置
+            used = set(tuple(s) for s in explicit_starts)
+            free_cells = [
+                (r, c)
+                for r in range(self.map_state.rows)
+                for c in range(self.map_state.cols)
+                if self.map_state.grid[r][c] == CellType.FREE and (r, c) not in used
+            ]
+            random.shuffle(free_cells)
+
+            needed = num_robots - len(explicit_starts)
+            if len(free_cells) < needed:
+                raise ValueError(
+                    f"地图上可用的 FREE 格子 ({len(free_cells)}) 不足以放置 "
+                    f"{needed} 个缺少起始位置的机器人。请增大地图或减少机器人数量。"
+                )
+            auto_starts = free_cells[:needed]
+
+            for i in range(num_robots):
+                if i < len(explicit_starts):
+                    start = explicit_starts[i]
+                else:
+                    start = auto_starts[i - len(explicit_starts)]
+                self.agents.append(AgentState(agent_id=i, start_position=start))
 
         # 初始化订单和任务容器
         self.order_state = OrderState()
