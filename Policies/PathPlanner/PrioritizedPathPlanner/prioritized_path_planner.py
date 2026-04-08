@@ -19,9 +19,21 @@ opposite directions).
 """
 
 import heapq
+from collections import deque
 from typing import List, Set, Tuple, Dict
 
+import numpy as np
 from Policies.PathPlanner.base_path_planner import BasePathPlanner
+
+# Try to import Cython-accelerated A* core
+try:
+    from Policies.PathPlanner.PrioritizedPathPlanner._astar_core import (
+        space_time_astar as _c_astar,
+        spatial_bfs as _c_bfs,
+    )
+    _USE_CYTHON = True
+except ImportError:
+    _USE_CYTHON = False
 
 
 def _manhattan(a: Tuple[int, int], b: Tuple[int, int]) -> int:
@@ -65,14 +77,18 @@ class PrioritizedPathPlanner(BasePathPlanner):
         arrival, preventing later agents from occupying it.  Default 20.
     """
 
-    def __init__(self, max_horizon: int = 100, goal_reserve: int = 20):
+    def __init__(self, max_horizon: int = 100, goal_reserve: int = 20,
+                 max_expansions: int = 10000):
         self.max_horizon = max_horizon
         self.goal_reserve = goal_reserve
+        self.max_expansions = max_expansions
 
         # Internal state — reset each tick
         self._vertex_res: Set[Tuple[int, int, int]] = set()
         self._edge_res: Set[Tuple[int, int, int, int, int]] = set()
+        self._static_blocked: Set[Tuple[int, int]] = set()
         self._last_tick: int = -1
+        self._walkable: np.ndarray = None  # cached walkable grid for Cython
 
     # ------------------------------------------------------------------
     # Public interface
@@ -105,12 +121,28 @@ class PrioritizedPathPlanner(BasePathPlanner):
         """
         tick = world_state.tick
 
-        # Reset reservation table once per tick
+        # Reset reservation table and static_blocked cache once per tick
         if tick != self._last_tick:
             self._last_tick = tick
             self._vertex_res = set()
             self._edge_res = set()
             self._pre_reserve_existing_paths(world_state)
+            # Cache static_blocked once per tick (non-carried pod positions)
+            self._static_blocked = {
+                pod.current_position
+                for pod in world_state.pod_state.pods.values()
+                if not pod.is_carried
+            }
+            # Cache walkable grid for Cython (only build once)
+            if _USE_CYTHON and self._walkable is None:
+                ms = world_state.map_state
+                from WorldState.map_state import CellType
+                w = np.zeros((ms.rows, ms.cols), dtype=np.uint8)
+                for r in range(ms.rows):
+                    for c in range(ms.cols):
+                        if ms.grid[r][c] != CellType.OBSTACLE:
+                            w[r, c] = 1
+                self._walkable = w
 
         start = agent.position
         if start == goal:
@@ -118,16 +150,22 @@ class PrioritizedPathPlanner(BasePathPlanner):
 
         map_state = world_state.map_state
 
-        # Static obstacles: pod positions when carrying a pod
-        static_blocked: Set[Tuple[int, int]] = set()
+        # Use cached static_blocked, only apply if agent is carrying a pod
         if agent.carried_pod_id is not None:
-            for pod in world_state.pod_state.pods.values():
-                if not pod.is_carried:
-                    static_blocked.add(pod.current_position)
-        static_blocked.discard(goal)
+            static_blocked = self._static_blocked - {goal}
+        else:
+            static_blocked = set()  # non-carrying agents can walk over pods
 
-        # Plan using space-time A*
-        path = self._space_time_astar(start, goal, map_state, static_blocked)
+        # Phase 1: Spatial BFS pre-check
+        spatial_dist = self._spatial_bfs(start, goal, map_state, static_blocked)
+        if spatial_dist < 0:
+            return []  # unreachable — fail instantly, no wasted search
+
+        # Phase 2: Space-time A* with dynamic horizon
+        effective_horizon = min(spatial_dist * 2, self.max_horizon)
+        path = self._space_time_astar(
+            start, goal, map_state, static_blocked, effective_horizon
+        )
 
         # Reserve the new path so lower-priority agents avoid it
         if path:
@@ -193,12 +231,63 @@ class PrioritizedPathPlanner(BasePathPlanner):
     # Space-time A*
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Phase 1: Spatial BFS (reachability + shortest distance)
+    # ------------------------------------------------------------------
+
+    def _spatial_bfs(
+        self,
+        start: Tuple[int, int],
+        goal: Tuple[int, int],
+        map_state,
+        static_blocked: Set[Tuple[int, int]],
+    ) -> int:
+        """
+        Fast BFS to check spatial reachability and return shortest path
+        length, ignoring time and reservations.
+
+        快速 BFS 检查空间可达性并返回最短路径长度（忽略时间和预留表）。
+
+        Returns
+        -------
+        int
+            Shortest path length (>= 1) if reachable, -1 if not.
+        """
+        if start == goal:
+            return 0
+
+        # Dispatch to Cython BFS if available
+        if _USE_CYTHON and self._walkable is not None:
+            return _c_bfs(
+                start[0], start[1], goal[0], goal[1],
+                map_state.rows, map_state.cols,
+                self._walkable, static_blocked,
+            )
+
+        # Pure Python fallback
+        visited = {start}
+        queue = deque([(start[0], start[1], 0)])
+        while queue:
+            r, c, dist = queue.popleft()
+            for nr, nc in map_state.get_neighbors(r, c):
+                if (nr, nc) == goal:
+                    return dist + 1
+                if (nr, nc) not in visited and (nr, nc) not in static_blocked:
+                    visited.add((nr, nc))
+                    queue.append((nr, nc, dist + 1))
+        return -1  # unreachable
+
+    # ------------------------------------------------------------------
+    # Phase 2: Space-time A*
+    # ------------------------------------------------------------------
+
     def _space_time_astar(
         self,
         start: Tuple[int, int],
         goal: Tuple[int, int],
         map_state,
         static_blocked: Set[Tuple[int, int]],
+        effective_horizon: int = 0,
     ) -> List[Tuple[int, int]]:
         """
         A* search in the (row, col, timestep) state space.
@@ -210,6 +299,24 @@ class PrioritizedPathPlanner(BasePathPlanner):
         动作：移动至相邻的四个正交方向位置 **或** 停留在原地。 
         避开预留表中记录的顶点和边预留。
         """
+        horizon = effective_horizon if effective_horizon > 0 else self.max_horizon
+
+        # Dispatch to Cython implementation if available
+        if _USE_CYTHON and self._walkable is not None:
+            return _c_astar(
+                start[0], start[1],
+                goal[0], goal[1],
+                map_state.rows, map_state.cols,
+                self._walkable,
+                self._vertex_res,
+                self._edge_res,
+                static_blocked,
+                horizon,
+                self.goal_reserve,
+                self.max_expansions,
+            )
+
+        # --- Pure Python fallback ---
         counter = 0
         open_set: list = []
         heapq.heappush(
@@ -222,8 +329,12 @@ class PrioritizedPathPlanner(BasePathPlanner):
         }
         came_from: Dict[Tuple[int, int, int], Tuple[int, int, int]] = {}
 
+        expansions = 0
         while open_set:
             _, _, r, c, t = heapq.heappop(open_set)
+            expansions += 1
+            if expansions > self.max_expansions:
+                break  # 超过展开上限，放弃搜索
 
             if (r, c) == goal:
                 # Reconstruct path (excluding start)

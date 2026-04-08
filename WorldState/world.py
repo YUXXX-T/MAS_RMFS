@@ -57,11 +57,14 @@ class WorldState:
         else:
             # 收集所有 FREE 格子，用于分配缺失的起始位置
             used = set(tuple(s) for s in explicit_starts)
+            pod_homes = set(self.map_state.pod_home_positions)
             free_cells = [
                 (r, c)
                 for r in range(self.map_state.rows)
                 for c in range(self.map_state.cols)
-                if self.map_state.grid[r][c] == CellType.FREE and (r, c) not in used
+                if self.map_state.grid[r][c] == CellType.FREE
+                and (r, c) not in used
+                and (r, c) not in pod_homes
             ]
             random.shuffle(free_cells)
 

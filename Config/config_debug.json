@@ -1,7 +1,7 @@
 {
     "map": {
-        "rows": 200,
-        "cols": 200,
+        "rows": 50,
+        "cols": 50,
         "obstacles": [],
         "stations": [
             {
@@ -11,68 +11,18 @@
             },
             {
                 "id": 2,
-                "row": 0,
-                "col": 22
+                "row": 49,
+                "col": 10
             },
             {
                 "id": 3,
                 "row": 0,
-                "col": 34
+                "col": 39
             },
             {
                 "id": 4,
-                "row": 0,
-                "col": 46
-            },
-            {
-                "id": 5,
-                "row": 0,
-                "col": 58
-            },
-            {
-                "id": 6,
-                "row": 199,
-                "col": 10
-            },
-            {
-                "id": 7,
-                "row": 199,
-                "col": 22
-            },
-            {
-                "id": 8,
-                "row": 199,
-                "col": 34
-            },
-            {
-                "id": 9,
-                "row": 199,
-                "col": 46
-            },
-            {
-                "id": 10,
-                "row": 199,
-                "col": 58
-            },
-            {
-                "id": 11,
-                "row": 50,
-                "col": 0
-            },
-            {
-                "id": 12,
-                "row": 75,
-                "col": 0
-            },
-            {
-                "id": 13,
-                "row": 50,
-                "col": 70
-            },
-            {
-                "id": 14,
-                "row": 75,
-                "col": 70
+                "row": 49,
+                "col": 39
             }
         ],
         "pod_layout": {
@@ -81,11 +31,11 @@
             "row_step": 14,
             "col_step": 6,
             "margin": 4,
-            "max_pods": 2500
+            "max_pods": 200
         }
     },
     "robots": {
-        "num_robots": 2000,
+        "num_robots": 100,
         "starts": [],
         "speed": 1
     },
@@ -96,20 +46,20 @@
             "C"
         ],
         "skus_per_pod": 3,
-        "sku_pool_size_per_type": 50,
-        "items_per_sku": 100
+        "sku_pool_size_per_type": 10,
+        "items_per_sku": 50
     },
     "simulation": {
-        "order_interval": 1,
-        "max_items_per_order": 3,
+        "order_interval": 3,
+        "max_items_per_order": 2,
         "pickup_duration": 2,
         "dropoff_duration": 2,
         "station_process_duration": 5,
-        "tick_delay": 0,
+        "tick_delay": 0.3,
         "p3d_view_mode": "2d",
-        "p3d_use_gpu": true,
+        "p3d_use_gpu": false,
         "night_mode": true,
-        "log_level": "WARNING",
+        "log_level": "INFO",
         "log_file": null,
         "fixed_order_size": false,
         "task_execution_mode": "parallel",

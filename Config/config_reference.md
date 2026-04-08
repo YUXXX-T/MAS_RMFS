@@ -26,7 +26,11 @@
 
 > 当前配置有 4 个工作站，分别位于地图四角附近。
 
-### 1.2 `pod_zones` — 货架存储片区列表
+### 1.2 货架存储片区 — 两种配置方式
+
+Pod 存储区支持两种互斥的配置方式，使用其中一种即可：
+
+#### 方式一：`pod_zones` — 显式列出每个片区（适合少量 zone）
 
 每个片区定义一个矩形区域，区域内每个格子放置一个 Pod。
 
@@ -35,9 +39,47 @@
 | `origin_row` | `int` | 片区左上角行号 |
 | `origin_col` | `int` | 片区左上角列号 |
 | `num_rows` | `int` | 片区行数 |
-| `num_cols` | `int` | 片区列数 |
+| `num_cols` | `int` | 片区列数（建议 ≤ 2，否则内部 Pod 无法取出） |
 
-> 当前配置有 8 个片区，每个 6×2 = 12 个位置，共 96 个 Pod。
+```json
+"pod_zones": [
+    {"origin_row": 3, "origin_col": 2, "num_rows": 6, "num_cols": 2},
+    {"origin_row": 3, "origin_col": 8, "num_rows": 6, "num_cols": 2}
+]
+```
+
+#### 方式二：`pod_layout` — 紧凑参数自动生成（适合大规模场景）
+
+用 5 个参数自动铺满整个地图，无需手动列出每个 zone。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `num_rows` | `int` | `10` | 每个 zone 的行数 |
+| `num_cols` | `int` | `2` | 每个 zone 的列数（建议 ≤ 2） |
+| `row_step` | `int` | `12` | 行方向周期 = `num_rows` + 行过道宽度 |
+| `col_step` | `int` | `6` | 列方向周期 = `num_cols` + 列过道宽度 |
+| `margin` | `int` | `3` | Pod 区域距地图边缘的格数 |
+| `max_pods` | `int` | `0` | Pod 总数上限（0 = 不限制，自动铺满） |
+
+```json
+"pod_layout": {
+    "num_rows": 10,
+    "num_cols": 2,
+    "row_step": 12,
+    "col_step": 6,
+    "margin": 4
+}
+```
+
+> 上例中列过道宽度 = `col_step - num_cols` = 6 - 2 = **4 格**，行过道宽度 = `row_step - num_rows` = 12 - 10 = **2 格**。
+
+布局示意（列方向）：
+```
+col:  margin  [P][P]  4格过道  [P][P]  4格过道  [P][P] ...
+        ↑     ←2列→  ←col_step=6→
+```
+
+> **注意**：`pod_layout` 和 `pod_zones` 二选一。同时存在时优先使用 `pod_layout`。
 
 ---
 
@@ -125,7 +167,8 @@ default_config.json
 │   ├── rows, cols              # 网格尺寸
 │   ├── obstacles               # 障碍物
 │   ├── stations[]              # 工作站 (id, row, col)
-│   └── pod_zones[]             # Pod 存储片区 (origin_row, origin_col, num_rows, num_cols)
+│   ├── pod_zones[]             # [方式一] 显式 Pod 片区列表
+│   └── pod_layout{}            # [方式二] 紧凑参数 (num_rows, num_cols, row_step, col_step, margin)
 ├── robots
 │   ├── num_robots              # 机器人数量
 │   ├── starts[]                # 初始位置

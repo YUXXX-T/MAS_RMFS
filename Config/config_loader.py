@@ -32,6 +32,33 @@ class PodZoneConfig:
 
 
 @dataclass
+class PodLayoutConfig:
+    """用紧凑参数自动生成 pod_zones 的配置。
+
+    Compact configuration that auto-generates pod_zones from a few parameters.
+
+    Parameters
+    ----------
+    num_rows : int
+        每个 pod_zone 的行数。
+    num_cols : int
+        每个 pod_zone 的列数（建议 ≤ 2，否则内部 pod 无法取出）。
+    row_step : int
+        行方向上相邻 pod_zone 起点间距（= num_rows + 行过道宽度）。
+    col_step : int
+        列方向上相邻 pod_zone 起点间距（= num_cols + 列过道宽度）。
+    margin : int
+        整体 pod 区域距离地图边缘的格数。
+    """
+    num_rows: int = 10
+    num_cols: int = 2
+    row_step: int = 12
+    col_step: int = 6
+    margin: int = 3
+    max_pods: int = 0  # 0 = 不限制，自动铺满；>0 = Pod 总数上限
+
+
+@dataclass
 class MapConfig:
     """Configuration for the warehouse map/grid."""
     rows: int
@@ -129,23 +156,56 @@ def load_config(path: str) -> SimulationConfig:
 
     # --- Parse map ---
     map_raw = raw.get("map", {})
+    map_rows = map_raw.get("rows", 10)
+    map_cols = map_raw.get("cols", 10)
     obstacles = [tuple(o) for o in map_raw.get("obstacles", [])]
     stations = [
         StationConfig(id=s["id"], row=s["row"], col=s["col"])
         for s in map_raw.get("stations", [])
     ]
-    pod_zones = [
-        PodZoneConfig(
-            origin_row=pz["origin_row"],
-            origin_col=pz["origin_col"],
-            num_rows=pz["num_rows"],
-            num_cols=pz["num_cols"],
+
+    # pod_zones: 支持两种格式
+    #   1. "pod_zones": [...]          — 显式列出每一个 zone（向后兼容）
+    #   2. "pod_layout": {num_rows, num_cols, row_step, col_step, margin}
+    #      — 紧凑参数自动生成
+    if "pod_layout" in map_raw:
+        pl = map_raw["pod_layout"]
+        layout = PodLayoutConfig(
+            num_rows=pl.get("num_rows", 10),
+            num_cols=pl.get("num_cols", 2),
+            row_step=pl.get("row_step", 12),
+            col_step=pl.get("col_step", 6),
+            margin=pl.get("margin", 3),
+            max_pods=pl.get("max_pods", 0),
         )
-        for pz in map_raw.get("pod_zones", [])
-    ]
+        pod_zones = []
+        pods_per_zone = layout.num_rows * layout.num_cols
+        total_pods = 0
+        for r in range(layout.margin, map_rows - layout.num_rows + 1, layout.row_step):
+            for c in range(layout.margin, map_cols - layout.num_cols + 1, layout.col_step):
+                pod_zones.append(PodZoneConfig(
+                    origin_row=r, origin_col=c,
+                    num_rows=layout.num_rows, num_cols=layout.num_cols,
+                ))
+                total_pods += pods_per_zone
+                if layout.max_pods > 0 and total_pods >= layout.max_pods:
+                    break
+            if layout.max_pods > 0 and total_pods >= layout.max_pods:
+                break
+    else:
+        pod_zones = [
+            PodZoneConfig(
+                origin_row=pz["origin_row"],
+                origin_col=pz["origin_col"],
+                num_rows=pz["num_rows"],
+                num_cols=pz["num_cols"],
+            )
+            for pz in map_raw.get("pod_zones", [])
+        ]
+
     map_config = MapConfig(
-        rows=map_raw.get("rows", 10),
-        cols=map_raw.get("cols", 10),
+        rows=map_rows,
+        cols=map_cols,
         obstacles=obstacles,
         stations=stations,
         pod_zones=pod_zones,
