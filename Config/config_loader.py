@@ -125,6 +125,7 @@ class SimulationParams:
     fixed_order_size: bool = False    # True = 每个订单固定 max_items_per_order 个 pod
     task_execution_mode: str = "parallel"  # "parallel" 或 "serial"
     max_items_per_sku: int = 5        # 订单中每种 SKU 需求的物品数量上限
+    initial_orders: int = 0           # 仿真开始时预生成的订单数量 (0 = 不预分配)
 
 
 @dataclass
@@ -237,6 +238,7 @@ def load_config(path: str) -> SimulationConfig:
         fixed_order_size=sim_raw.get("fixed_order_size", False),
         task_execution_mode=sim_raw.get("task_execution_mode", "parallel"),
         max_items_per_sku=sim_raw.get("max_items_per_sku", 5),
+        initial_orders=sim_raw.get("initial_orders", 0),
     )
 
     # --- Parse policies ---

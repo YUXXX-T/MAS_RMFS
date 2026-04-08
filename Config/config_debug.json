@@ -63,7 +63,8 @@
         "log_file": null,
         "fixed_order_size": false,
         "task_execution_mode": "parallel",
-        "max_items_per_sku": 3
+        "max_items_per_sku": 3,
+        "initial_orders": 50
     },
     "policies": {
         "order_generator": {

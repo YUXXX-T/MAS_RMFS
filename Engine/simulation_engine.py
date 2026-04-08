@@ -63,6 +63,46 @@ class SimulationEngine:
         )
         self._running = True
 
+        # 预分配模式
+        self._pre_allocate()
+
+    def _pre_allocate(self):
+        """预分配模式：在仿真开始前批量生成订单并分配任务。"""
+        n = self.config.simulation.initial_orders
+        if n <= 0:
+            return
+
+        self.logger.info(f"Pre-allocating {n} orders...")
+
+        generated = 0
+        # Order generator only fires on tick % interval == 0 and tick > 0
+        # Temporarily advance tick to force generation, then reset.
+        fake_tick = self.config.simulation.order_interval
+        while generated < n:
+            self.world.tick = fake_tick  # pretend we're at interval tick
+            orders = self.order_generator.generate(self.world)
+            self.world.tick = 0         # reset
+            for order in orders:
+                if generated >= n:
+                    break
+                self.world.order_state.add_order(order)
+                self.logger.info(
+                    f"[Pre-alloc] Order #{order.order_id}: "
+                    f"sku_demands={order.sku_demands} -> station {order.station_id}"
+                )
+                generated += 1
+            fake_tick += self.config.simulation.order_interval
+            if fake_tick > 100000:
+                break  # safety
+
+        self.world.tick = 0  # ensure tick starts at 0
+
+        # 立即分配任务
+        new_tasks = self.task_assigner.assign(self.world)
+        self.logger.info(
+            f"[Pre-alloc] Generated {generated} orders, assigned {len(new_tasks)} tasks"
+        )
+
     def run(self):
         """
         Start the continuous simulation loop.
@@ -85,7 +125,7 @@ class SimulationEngine:
         self.logger.info(f"  Pods: {self.world.pod_state.total_pods}")
         self.logger.info(f"  Stations: {len(self.world.map_state.station_positions)}")
         self.logger.info("  Press Ctrl+C to stop.")
-        self.logger.info("=" * 60)
+        self.logger.info("="  * 60)
 
         try:
             while self._running:

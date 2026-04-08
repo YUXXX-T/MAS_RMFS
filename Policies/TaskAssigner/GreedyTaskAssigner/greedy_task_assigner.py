@@ -85,8 +85,17 @@ class GreedyTaskAssigner(BaseTaskAssigner):
 
             for pod_id in order.pod_ids:
                 pod = world_state.pod_state.get_pod(pod_id)
+
+                # If the originally chosen pod is unavailable, try to find an
+                # alternative pod that can fulfil the same SKU demands.
                 if pod is None or pod.is_carried or pod_id in reserved_pods:
-                    continue
+                    alt_pod = self._find_alternative_pod(
+                        order, pod_id, reserved_pods, world_state
+                    )
+                    if alt_pod is None:
+                        continue
+                    pod = alt_pod
+                    pod_id = alt_pod.pod_id
 
                 # Find nearest idle agent
                 idle_agents = world_state.get_idle_agents()
@@ -163,6 +172,31 @@ class GreedyTaskAssigner(BaseTaskAssigner):
                 order.status = OrderStatus.IN_PROGRESS
 
         return new_tasks
+
+    def _find_alternative_pod(self, order, original_pod_id, reserved_pods, world_state):
+        """
+        当原始 Pod 被占用时，寻找一个含有相同 SKU 的替代 Pod。
+
+        Find an alternative pod that has at least one SKU needed by the order,
+        excluding already-reserved pods.
+        """
+        needed_skus = {sku for sku, qty in order.sku_demands.items() if qty > 0}
+        available_pods = world_state.pod_state.get_available_pods()
+
+        best_pod = None
+        best_score = 0
+        for pod in available_pods:
+            if pod.pod_id in reserved_pods or pod.is_carried:
+                continue
+            score = sum(
+                1 for sku in needed_skus
+                if sku in pod.sku_inventory and pod.sku_inventory[sku] > 0
+            )
+            if score > best_score:
+                best_score = score
+                best_pod = pod
+
+        return best_pod
 
     def _assign_serial(self, world_state) -> List[Task]:
         """

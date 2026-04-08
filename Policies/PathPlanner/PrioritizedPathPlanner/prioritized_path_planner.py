@@ -133,6 +133,13 @@ class PrioritizedPathPlanner(BasePathPlanner):
                 for pod in world_state.pod_state.pods.values()
                 if not pod.is_carried
             }
+            # Cache positions of non-moving agents (idle OR stuck without path)
+            # They won't move, so treat as obstacles instead of reservations
+            self._idle_agent_positions = {
+                ag.position
+                for ag in world_state.agents
+                if not ag.has_path and not ag.is_waiting
+            }
             # Cache walkable grid for Cython (only build once)
             if _USE_CYTHON and self._walkable is None:
                 ms = world_state.map_state
@@ -150,11 +157,13 @@ class PrioritizedPathPlanner(BasePathPlanner):
 
         map_state = world_state.map_state
 
-        # Use cached static_blocked, only apply if agent is carrying a pod
+        # Build per-agent static_blocked:
+        #   pods (if carrying) + idle agents (excluding self) - goal
+        idle_others = self._idle_agent_positions - {start}
         if agent.carried_pod_id is not None:
-            static_blocked = self._static_blocked - {goal}
+            static_blocked = (self._static_blocked | idle_others) - {goal}
         else:
-            static_blocked = set()  # non-carrying agents can walk over pods
+            static_blocked = idle_others  # non-carrying agents can walk over pods
 
         # Phase 1: Spatial BFS pre-check
         spatial_dist = self._spatial_bfs(start, goal, map_state, static_blocked)
@@ -184,6 +193,10 @@ class PrioritizedPathPlanner(BasePathPlanner):
         在预留表中填入所有智能体的当前位置及计划的未来位置，包括正在目的地等待的智能体。
         """
         for agent in world_state.agents:
+            # Skip non-moving agents — they are treated as static obstacles
+            if not agent.has_path and not agent.is_waiting:
+                continue
+
             pos = agent.position
             # Reserve current position at time-step 0
             self._vertex_res.add((pos[0], pos[1], 0))
