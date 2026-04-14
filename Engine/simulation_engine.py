@@ -9,6 +9,8 @@ import signal
 import sys
 from typing import Optional
 
+from typing import TYPE_CHECKING
+
 from Config.config_loader import SimulationConfig
 from WorldState.world import WorldState
 from WorldState.agent_state import AgentStatus
@@ -18,6 +20,9 @@ from Policies.OrderGenerator import BaseOrderGenerator
 from Policies.TaskAssigner import BaseTaskAssigner
 from Policies.PathPlanner import BasePathPlanner
 from Debug.logger import SimLogger
+
+if TYPE_CHECKING:
+    from TrajectoryRecord.trajectory_recorder import TrajectoryRecorder
 
 
 class SimulationEngine:
@@ -48,6 +53,8 @@ class SimulationEngine:
         task_assigner: BaseTaskAssigner,
         path_planner: BasePathPlanner,
         visualizer=None,
+        trajectory_recorder: "TrajectoryRecorder | None" = None,
+        trajectory_output: str = "",
     ):
         self.config = config
         self.world = WorldState(config)
@@ -55,6 +62,8 @@ class SimulationEngine:
         self.task_assigner = task_assigner
         self.path_planner = path_planner
         self.visualizer = visualizer
+        self.trajectory_recorder = trajectory_recorder
+        self.trajectory_output = trajectory_output
 
         self.logger = SimLogger(
             "Engine",
@@ -137,6 +146,8 @@ class SimulationEngine:
             self.logger.error(f"Simulation error: {e}")
             raise
         finally:
+            if self.trajectory_recorder and self.trajectory_output:
+                self.trajectory_recorder.save(self.trajectory_output)
             self._print_summary()
             signal.signal(signal.SIGINT, original_handler)
 
@@ -180,6 +191,10 @@ class SimulationEngine:
         # --- 步骤 8：可视化（可选） ---
         if self.visualizer:
             self.visualizer.render(self.world)
+
+        # --- 步骤 9：记录轨迹（可选） ---
+        if self.trajectory_recorder:
+            self.trajectory_recorder.snapshot(self.world)
 
         # Advance tick
         self.world.advance_tick()

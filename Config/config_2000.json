@@ -85,7 +85,7 @@
         }
     },
     "robots": {
-        "num_robots": 2000,
+        "num_robots": 1000,
         "starts": [],
         "speed": 1
     },

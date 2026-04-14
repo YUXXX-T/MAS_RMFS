@@ -1,7 +1,7 @@
 {
     "map": {
-        "rows": 200,
-        "cols": 200,
+        "rows": 20,
+        "cols": 20,
         "obstacles": [],
         "stations": [
             {

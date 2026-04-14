@@ -13,6 +13,7 @@
 - [🧩 如何集成自定义算法](#-如何集成自定义算法)
 - [📦 已有算法列表](#-已有算法列表)
 - [🎮 Panda3D 可视化](#-panda3d-可视化)
+- [🎬 轨迹录制与回放](#-轨迹录制与回放)
 - [🧠 强化学习接口](#-强化学习接口)
 
 ---
@@ -64,7 +65,11 @@ MAS_RMFS/
 ├── Visualization/                # 可视化
 │   ├── visualizer.py             # 终端 ASCII / Matplotlib 仪表盘
 │   ├── panda3d_visualizer.py     # Panda3D 2D/3D 可视化
-│   └── ui.py                     # Qt 统一窗口（嵌入 Panda3D + 图表面板）
+│   ├── ui.py                     # Qt 统一窗口（嵌入 Panda3D + 图表面板）
+│   └── trajectory_visualizer.py  # 独立轨迹回放工具（Matplotlib）
+├── TrajectoryRecord/             # 轨迹录制与数据管理
+│   ├── trajectory_recorder.py    # 录制器：每 tick 快照 → gzip JSON
+│   └── replay_state.py           # 回放适配器：TrajectoryData → WorldState 接口
 ├── Env/                          # 🧠 强化学习环境
 │   └── rmfs_env.py               # PettingZoo ParallelEnv 封装
 └── Debug/
@@ -79,6 +84,7 @@ MAS_RMFS/
 | `WorldState` | 维护仿真的全部状态（地图、智能体、货架、订单、任务） |
 | `Engine` | 驱动仿真主循环，按固定顺序调用各策略 |
 | `Policies` | 提供算法接口（抽象基类）和具体实现，通过注册中心按名称查找 |
+| `TrajectoryRecord` | 录制仿真轨迹并保存为可移植数据文件，支持独立加载回放 |
 | `Env` | PettingZoo 多智能体 RL 环境封装 |
 | `Visualization` | 可选的实时可视化渲染 |
 
@@ -101,6 +107,12 @@ python main.py --visualize
 
 # 指定自定义配置文件
 python main.py --config path/to/my_config.json
+
+# 录制轨迹（仿真结束后自动保存 .traj.json.gz 文件）
+python main.py --record
+
+# 使用 Panda3D 回放轨迹文件
+python main.py --replay TrajectoryRecord/trajectory_xxx.traj.json.gz
 
 # 🧠 使用 PettingZoo RL 环境
 python -c "from Env.rmfs_env import RMFSEnv; env = RMFSEnv(); print(env.possible_agents)"
@@ -401,6 +413,106 @@ list_policies(category=None)     # 列出已注册的算法
 |--------|------|---------|
 | `HomeReturnPlanner` | 始终返回货架的原始位置（默认） | — |
 | `NearestSlotPlanner` | 返回距工作站最近的空闲货架位 | — |
+
+---
+
+## 🎬 轨迹录制与回放
+
+仿真运行期间可录制所有机器人的运动轨迹，保存为独立的数据文件（`.traj.json.gz`），之后可随时加载回放和分析。
+
+### 📹 录制轨迹
+
+在正常仿真命令后加上 `--record` 标志即可启用录制，仿真结束（`Ctrl+C`）时自动保存：
+
+```bash
+# 基本用法（自动生成带时间戳的文件名）
+python main.py --record
+
+# 指定输出路径
+python main.py --record --record-output my_experiment.traj.json.gz
+
+# 每 5 tick 采样一次（减小文件体积）
+python main.py --record --record-interval 5
+
+# 录制 + 实时可视化（可同时使用）
+python main.py --p3d --record
+```
+
+录制参数：
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--record` | 启用轨迹录制 | 关闭 |
+| `--record-output` | 输出文件路径 | `TrajectoryRecord/trajectory_<时间戳>.traj.json.gz` |
+| `--record-interval` | 采样间隔（tick 数） | `1`（每 tick 都记录） |
+
+### ▶️ Panda3D 回放
+
+使用 `--replay` 加载轨迹文件，在 Panda3D + Qt 窗口中回放：
+
+```bash
+# 基本回放（默认 10fps）
+python main.py --replay TrajectoryRecord/trajectory_xxx.traj.json.gz
+
+# 指定回放帧率
+python main.py --replay trajectory.traj.json.gz --replay-fps 5
+
+# 更快回放
+python main.py --replay trajectory.traj.json.gz --replay-fps 30
+```
+
+回放参数：
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--replay` | 轨迹数据文件路径 | — |
+| `--replay-fps` | 回放帧率（1-60） | `10` |
+
+回放窗口操作：
+
+| 快捷键 | 功能 |
+|--------|------|
+| `Space` | 播放 / 暂停 |
+| `Left` / `Right` | 单步后退 / 前进 |
+| `Up` / `Down` | 加速 / 减速 |
+| `Home` / `End` | 跳转到首帧 / 末帧 |
+| `C` | 显示 / 隐藏图表面板 |
+
+左侧控制面板还提供 **FPS 滑块**（1-60fps）、**步长滑块**（每帧跳过 1-50 帧）和**帧进度条**。
+
+### 📊 Matplotlib 独立回放
+
+不依赖 Panda3D，使用 matplotlib 回放轨迹（含机器人轨迹尾迹、路径密度热力图、状态时间线）：
+
+```bash
+python -m Visualization.trajectory_visualizer trajectory.traj.json.gz
+
+# 可选参数
+python -m Visualization.trajectory_visualizer trajectory.traj.json.gz --speed 5 --trail 30 --light
+```
+
+### 🔌 在 Python 中直接使用
+
+```python
+from TrajectoryRecord import TrajectoryData
+
+# 加载轨迹数据
+data = TrajectoryData.load("TrajectoryRecord/trajectory_xxx.traj.json.gz")
+
+print(f"地图: {data.rows}x{data.cols}")
+print(f"机器人: {data.num_agents}")
+print(f"总帧数: {data.total_ticks}")
+
+# 获取单个机器人的轨迹
+traj = data.get_agent_trajectory(agent_id=0)  # [(row, col), ...]
+
+# 获取所有机器人的轨迹
+all_trajs = data.get_all_trajectories()  # {agent_id: [(row, col), ...]}
+
+# 获取某一帧的数据
+frame = data.get_frame(tick=10)
+# frame = {"tick": 10, "agents": [{"id": 0, "pos": [3, 5], "status": "CARRYING", "pod": 2}, ...]}
+```
 
 ---
 

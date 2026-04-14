@@ -13,6 +13,7 @@ MAS-RMFS：多智能体机器人移动履行系统仿真
 import argparse
 import os
 import sys
+import time
 
 from Config.config_loader import load_config, SimulationConfig
 from Engine.simulation_engine import SimulationEngine
@@ -29,7 +30,7 @@ def main():
     parser.add_argument(
         "--config",
         type=str,
-        default=os.path.join(os.path.dirname(__file__), "Config", "config_2000.json"),
+        default=os.path.join(os.path.dirname(__file__), "Config", "default_config.json"),
         help="JSON 配置文件路径。",
     )
     # default=os.path.join(os.path.dirname(__file__), "Config", "default_config.json"),
@@ -50,7 +51,68 @@ def main():
         help="启用 Panda3D 2D 正交可视化。",
     )
 
+    # --- 轨迹记录参数 ---
+    parser.add_argument(
+        "--record",
+        action="store_true",
+        help="启用轨迹记录，仿真结束后保存为可导入的数据文件。",
+    )
+    parser.add_argument(
+        "--record-output",
+        type=str,
+        default="",
+        help="轨迹数据输出路径（默认: TrajectoryRecord/trajectory_<timestamp>.traj.json.gz）。",
+    )
+    parser.add_argument(
+        "--record-interval",
+        type=int,
+        default=1,
+        help="轨迹采样间隔（tick 数），默认 1 表示每 tick 都记录。",
+    )
+
+    # --- 轨迹回放参数 ---
+    parser.add_argument(
+        "--replay",
+        type=str,
+        default="",
+        help="加载轨迹数据文件并使用 Panda3D 回放（跳过仿真）。",
+    )
+    parser.add_argument(
+        "--replay-fps",
+        type=int,
+        default=10,
+        help="回放帧率，默认 10fps。范围 1-60。",
+    )
+
     args = parser.parse_args()
+
+    # ═══════════════════════════════════════════════════════════════
+    # 回放模式：加载轨迹数据并直接启动 Panda3D 回放 UI
+    # ═══════════════════════════════════════════════════════════════
+    if args.replay:
+        from TrajectoryRecord import TrajectoryData
+        from Visualization.panda3d_visualizer import Panda3DVisualizer
+        from Visualization.ui import ReplayUI
+
+        logger = SimLogger("Main")
+        logger.info(f"Loading trajectory: {args.replay}")
+        data = TrajectoryData.load(args.replay)
+        logger.info(f"  Map: {data.rows}x{data.cols}, Agents: {data.num_agents}, "
+                     f"Frames: {data.total_ticks}")
+
+        visualizer = Panda3DVisualizer(
+            view_mode="2d",
+            use_gpu=False,
+            night_mode=True,
+        )
+        ui = ReplayUI(data=data, visualizer=visualizer, night_mode=True,
+                      initial_fps=args.replay_fps)
+        ui.run()
+        return
+
+    # ═══════════════════════════════════════════════════════════════
+    # 正常仿真模式
+    # ═══════════════════════════════════════════════════════════════
 
     # --- 加载配置 ---
     logger = SimLogger("Main")
@@ -109,6 +171,22 @@ def main():
     else:
         visualizer = None
 
+    # --- 轨迹记录器 ---
+    trajectory_recorder = None
+    trajectory_output = ""
+    if args.record:
+        from TrajectoryRecord import TrajectoryRecorder
+
+        trajectory_recorder = TrajectoryRecorder(sample_interval=args.record_interval)
+        if args.record_output:
+            trajectory_output = args.record_output
+        else:
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            traj_dir = os.path.join(os.path.dirname(__file__), "TrajectoryRecord")
+            os.makedirs(traj_dir, exist_ok=True)
+            trajectory_output = os.path.join(traj_dir, f"trajectory_{ts}.traj.json.gz")
+        logger.info(f"Trajectory recording enabled -> {trajectory_output}")
+
     # --- 创建引擎 ---
     engine = SimulationEngine(
         config=config,
@@ -116,6 +194,8 @@ def main():
         task_assigner=task_assigner,
         path_planner=path_planner,
         visualizer=visualizer,
+        trajectory_recorder=trajectory_recorder,
+        trajectory_output=trajectory_output,
     )
 
     # --- 运行 ---
