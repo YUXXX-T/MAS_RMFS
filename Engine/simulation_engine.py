@@ -55,6 +55,7 @@ class SimulationEngine:
         visualizer=None,
         trajectory_recorder: "TrajectoryRecorder | None" = None,
         trajectory_output: str = "",
+        max_ticks: int = 0,
     ):
         self.config = config
         self.world = WorldState(config)
@@ -64,6 +65,7 @@ class SimulationEngine:
         self.visualizer = visualizer
         self.trajectory_recorder = trajectory_recorder
         self.trajectory_output = trajectory_output
+        self.max_ticks = max_ticks
 
         self.logger = SimLogger(
             "Engine",
@@ -133,12 +135,20 @@ class SimulationEngine:
         self.logger.info(f"  Agents: {len(self.world.agents)}")
         self.logger.info(f"  Pods: {self.world.pod_state.total_pods}")
         self.logger.info(f"  Stations: {len(self.world.map_state.station_positions)}")
+        if self.max_ticks > 0:
+            self.logger.info(f"  Max ticks: {self.max_ticks}")
         self.logger.info("  Press Ctrl+C to stop.")
         self.logger.info("="  * 60)
 
         try:
             while self._running:
                 self._tick()
+                # 达到最大 tick 数时自动停止
+                if self.max_ticks > 0 and self.world.tick >= self.max_ticks:
+                    self.logger.info(
+                        f"Reached max ticks ({self.max_ticks}). Stopping simulation."
+                    )
+                    break
                 if self.config.simulation.tick_delay > 0:
                     import time
                     time.sleep(self.config.simulation.tick_delay)

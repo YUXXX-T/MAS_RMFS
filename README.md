@@ -111,8 +111,17 @@ python main.py --config path/to/my_config.json
 # 录制轨迹（仿真结束后自动保存 .traj.json.gz 文件）
 python main.py --record
 
+# 录制轨迹，运行 500 ticks 后自动停止
+python main.py --record --max-ticks 500
+
 # 使用 Panda3D 回放轨迹文件
 python main.py --replay TrajectoryRecord/trajectory_xxx.traj.json.gz
+
+# 多轨迹同时回放对比
+python main.py --replay file1.traj.json.gz file2.traj.json.gz
+
+# 指定回放网格布局（如 1x3 表示 1 行 3 列）
+python main.py --replay f1.traj.json.gz f2.traj.json.gz f3.traj.json.gz --replay-layout 1x3
 
 # 🧠 使用 PettingZoo RL 环境
 python -c "from Env.rmfs_env import RMFSEnv; env = RMFSEnv(); print(env.possible_agents)"
@@ -422,7 +431,7 @@ list_policies(category=None)     # 列出已注册的算法
 
 ### 📹 录制轨迹
 
-在正常仿真命令后加上 `--record` 标志即可启用录制，仿真结束（`Ctrl+C`）时自动保存：
+在正常仿真命令后加上 `--record` 标志即可启用录制，仿真结束（`Ctrl+C`）或达到 `--max-ticks` 上限时自动保存：
 
 ```bash
 # 基本用法（自动生成带时间戳的文件名）
@@ -433,6 +442,9 @@ python main.py --record --record-output my_experiment.traj.json.gz
 
 # 每 5 tick 采样一次（减小文件体积）
 python main.py --record --record-interval 5
+
+# 运行 1000 ticks 后自动停止并保存
+python main.py --record --max-ticks 1000
 
 # 录制 + 实时可视化（可同时使用）
 python main.py --p3d --record
@@ -445,28 +457,38 @@ python main.py --p3d --record
 | `--record` | 启用轨迹录制 | 关闭 |
 | `--record-output` | 输出文件路径 | `TrajectoryRecord/trajectory_<时间戳>.traj.json.gz` |
 | `--record-interval` | 采样间隔（tick 数） | `1`（每 tick 都记录） |
+| `--max-ticks` | 最大运行 tick 数，到达后自动停止仿真 | `0`（无限制） |
 
 ### ▶️ Panda3D 回放
 
-使用 `--replay` 加载轨迹文件，在 Panda3D + Qt 窗口中回放：
+使用 `--replay` 加载一个或多个轨迹文件，在 Panda3D + Qt 窗口中回放：
 
 ```bash
-# 基本回放（默认 10fps）
+# 单文件回放（默认 10fps）
 python main.py --replay TrajectoryRecord/trajectory_xxx.traj.json.gz
 
 # 指定回放帧率
 python main.py --replay trajectory.traj.json.gz --replay-fps 5
 
-# 更快回放
-python main.py --replay trajectory.traj.json.gz --replay-fps 30
+# 多轨迹同时回放对比（自动计算网格布局）
+python main.py --replay run1.traj.json.gz run2.traj.json.gz
+
+# 指定网格布局（1 行 3 列）
+python main.py --replay a.traj.json.gz b.traj.json.gz c.traj.json.gz --replay-layout 1x3
+
+# 2x2 网格布局
+python main.py --replay f1.traj.json.gz f2.traj.json.gz f3.traj.json.gz f4.traj.json.gz --replay-layout 2x2
 ```
+
+> 单文件使用 `ReplayUI`；多文件使用 `MultiReplayUI`，所有轨迹在同一窗口的 RxC 网格中独立渲染，共享播放控件。
 
 回放参数：
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--replay` | 轨迹数据文件路径 | — |
+| `--replay` | 轨迹数据文件路径（支持多个） | — |
 | `--replay-fps` | 回放帧率（1-60） | `10` |
+| `--replay-layout` | 多轨迹网格布局，如 `2x1`、`1x3`、`2x2` | 自动计算 |
 
 回放窗口操作：
 

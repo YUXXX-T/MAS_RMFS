@@ -8,6 +8,7 @@ MAS-RMFS：多智能体机器人移动履行系统仿真
     python main.py --config path/to/cfg.json  # 使用自定义配置
     python main.py --visualize              # 启用终端可视化
     python main.py --mpl                    # 启用 matplotlib 仪表盘
+    python main.py --record --max-ticks 500 # 记录轨迹，运行 500 ticks 后自动停止
 """
 
 import argparse
@@ -69,6 +70,12 @@ def main():
         type=int,
         default=1,
         help="轨迹采样间隔（tick 数），默认 1 表示每 tick 都记录。",
+    )
+    parser.add_argument(
+        "--max-ticks",
+        type=int,
+        default=0,
+        help="最大运行 tick 数，到达后自动停止仿真。0 表示无限制（默认）。",
     )
 
     # --- 轨迹回放参数 ---
@@ -255,6 +262,7 @@ def main():
         visualizer=visualizer,
         trajectory_recorder=trajectory_recorder,
         trajectory_output=trajectory_output,
+        max_ticks=args.max_ticks,
     )
 
     # --- 运行 ---

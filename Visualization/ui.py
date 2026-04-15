@@ -624,6 +624,21 @@ class SimulationUI(QMainWindow):
                     return
                 self._last_tick_time = now
 
+                # 达到最大 tick 数时自动暂停并保存轨迹
+                if (self._engine.max_ticks > 0
+                        and self._engine.world.tick >= self._engine.max_ticks):
+                    self._engine.logger.info(
+                        f"Reached max ticks ({self._engine.max_ticks}). "
+                        f"Stopping simulation."
+                    )
+                    self._stopped = True
+                    self._paused = True
+                    if (self._engine.trajectory_recorder
+                            and self._engine.trajectory_output):
+                        self._engine.trajectory_recorder.save(
+                            self._engine.trajectory_output)
+                    self._engine._print_summary()
+
                 # 每个 tick 累积图表数据
                 self._accumulate_chart_data(self._engine.world)
 
