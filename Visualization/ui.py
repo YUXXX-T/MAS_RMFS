@@ -1287,3 +1287,412 @@ class ReplayUI(QMainWindow):
         print("=" * 60)
         self.show()
         self._qt_app.exec()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Multi-Replay UI — 多轨迹同时回放
+# ═══════════════════════════════════════════════════════════════════
+
+
+class MultiReplayUI(QMainWindow):
+    """
+    Qt 主窗口，支持多个轨迹文件在 RxC 网格布局中同时回放。
+
+    每个轨迹渲染到 Panda3D 窗口内独立的 DisplayRegion 中，
+    所有轨迹共享播放控件（播放/暂停、帧滑块、FPS、步长）。
+
+    用法（from main.py）：
+        ui = MultiReplayUI(datasets, labels, layout, visualizer, ...)
+        ui.run()
+    """
+
+    def __init__(
+        self,
+        datasets: list,
+        labels: list[str],
+        layout: tuple[int, int],
+        visualizer,
+        night_mode: bool = True,
+        initial_fps: int = 10,
+    ):
+        self._qt_app = QApplication.instance() or QApplication([])
+        super().__init__()
+        self._datasets = datasets
+        self._labels = labels
+        self._layout = layout
+        self._viz = visualizer
+        self._night_mode = night_mode
+        self._initial_fps = max(1, min(60, initial_fps))
+
+        # 回放状态
+        from TrajectoryRecord.replay_state import ReplayWorldState
+        self._replay_worlds = [ReplayWorldState(d) for d in datasets]
+        self._max_frames = max(rw.total_frames for rw in self._replay_worlds)
+        self._current_frame = 0
+        self._paused = True
+        self._speed = 1
+        self._frame_interval = 1.0 / self._initial_fps
+        self._last_advance_time = 0.0
+
+        self._build_ui()
+        self.setStyleSheet(_DARK_STYLE if night_mode else _LIGHT_STYLE)
+
+        # 定时器
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._on_timer)
+        self._timer.start(16)
+
+        self._panda_embedded = False
+
+    # ── UI 构建 ───────────────────────────────────────────────
+
+    def _build_ui(self):
+        grid_rows, grid_cols = self._layout
+        n = len(self._datasets)
+
+        self.setWindowTitle(
+            f"MAS-RMFS  \u2014  Multi-Replay {grid_rows}\u00d7{grid_cols}  "
+            f"({n} trajectories)"
+        )
+        self.resize(1500, 950)
+
+        inner_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.setCentralWidget(inner_splitter)
+
+        # 左侧面板
+        left_widget = QWidget()
+        left_widget.setMinimumWidth(300)
+        left_widget.setMaximumWidth(420)
+        lo = QVBoxLayout(left_widget)
+        lo.setContentsMargins(12, 12, 12, 12)
+        lo.setSpacing(10)
+
+        title = QLabel("\U0001f3ac Multi-Replay")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        lo.addWidget(title)
+
+        # ── 回放状态 ──
+        status_box = QGroupBox("Playback")
+        status_layout = QVBoxLayout(status_box)
+
+        self._status_label = QLabel("\u23f8  PAUSED")
+        self._status_label.setObjectName("statusLabel")
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_layout.addWidget(self._status_label)
+
+        self._frame_label = QLabel("Frame: 0 / 0")
+        self._frame_label.setObjectName("tickLabel")
+        self._frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_layout.addWidget(self._frame_label)
+
+        info_row = QHBoxLayout()
+        self._layout_label = QLabel(f"Layout: {grid_rows}\u00d7{grid_cols}")
+        self._count_label = QLabel(f"Files: {n}")
+        info_row.addWidget(self._layout_label)
+        info_row.addWidget(self._count_label)
+        status_layout.addLayout(info_row)
+        lo.addWidget(status_box)
+
+        # ── 控件 ──
+        ctrl_box = QGroupBox("Controls")
+        ctrl_layout = QVBoxLayout(ctrl_box)
+
+        btn_row = QHBoxLayout()
+        self._play_btn = QPushButton("\u25b6  Play")
+        self._play_btn.setObjectName("playBtn")
+        self._play_btn.clicked.connect(self._toggle_pause)
+        btn_row.addWidget(self._play_btn)
+
+        self._prev_btn = QPushButton("\u23ee  Prev")
+        self._prev_btn.clicked.connect(lambda: self._step(-1))
+        btn_row.addWidget(self._prev_btn)
+
+        self._next_btn = QPushButton("Next  \u23ed")
+        self._next_btn.clicked.connect(lambda: self._step(1))
+        btn_row.addWidget(self._next_btn)
+        ctrl_layout.addLayout(btn_row)
+
+        # 帧滑块
+        slider_label = QLabel("\U0001f39e  Frame")
+        slider_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ctrl_layout.addWidget(slider_label)
+
+        self._frame_slider = QSlider(Qt.Orientation.Horizontal)
+        self._frame_slider.setRange(0, max(0, self._max_frames - 1))
+        self._frame_slider.setValue(0)
+        self._frame_slider.valueChanged.connect(self._on_frame_slider)
+        ctrl_layout.addWidget(self._frame_slider)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        ctrl_layout.addWidget(sep)
+
+        # FPS 控制
+        fps_label = QLabel("\u23f1  Playback FPS")
+        fps_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ctrl_layout.addWidget(fps_label)
+
+        fps_row = QHBoxLayout()
+        self._fps_slider = QSlider(Qt.Orientation.Horizontal)
+        self._fps_slider.setRange(1, 60)
+        self._fps_slider.setValue(self._initial_fps)
+        self._fps_slider.valueChanged.connect(self._on_fps_change)
+        fps_row.addWidget(self._fps_slider)
+
+        self._fps_value = QLabel(f"{self._initial_fps} fps")
+        self._fps_value.setMinimumWidth(55)
+        fps_row.addWidget(self._fps_value)
+        ctrl_layout.addLayout(fps_row)
+
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(4)
+        for label_text, val in [("2fps", 2), ("5fps", 5), ("10fps", 10),
+                                ("30fps", 30), ("60fps", 60)]:
+            btn = QPushButton(label_text)
+            btn.setObjectName("speedPreset")
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding,
+                              QSizePolicy.Policy.Fixed)
+            btn.clicked.connect(lambda _, v=val: self._set_fps(v))
+            preset_row.addWidget(btn)
+        ctrl_layout.addLayout(preset_row)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setFrameShadow(QFrame.Shadow.Sunken)
+        ctrl_layout.addWidget(sep2)
+
+        # 步长控制
+        step_label = QLabel("\u23e9  Step Size")
+        step_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ctrl_layout.addWidget(step_label)
+
+        step_row = QHBoxLayout()
+        self._speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self._speed_slider.setRange(1, 50)
+        self._speed_slider.setValue(1)
+        self._speed_slider.valueChanged.connect(self._on_speed_change)
+        step_row.addWidget(self._speed_slider)
+
+        self._speed_value = QLabel("x1")
+        self._speed_value.setMinimumWidth(40)
+        step_row.addWidget(self._speed_value)
+        ctrl_layout.addLayout(step_row)
+        lo.addWidget(ctrl_box)
+
+        # ── 信息区域 ──
+        info_box = QGroupBox("Trajectories")
+        info_lo = QVBoxLayout(info_box)
+        for i, data in enumerate(self._datasets):
+            lbl = QLabel(
+                f"[{i}] {self._labels[i]}\n"
+                f"    Map: {data.rows}\u00d7{data.cols}  "
+                f"Agents: {data.num_agents}  "
+                f"Frames: {data.total_ticks}"
+            )
+            lbl.setStyleSheet("font-size: 10px;")
+            info_lo.addWidget(lbl)
+        lo.addWidget(info_box)
+
+        lo.addStretch()
+
+        hint = QLabel(
+            "Space: Play/Pause  |  Left/Right: Step\n"
+            "Up/Down: Speed  |  Home/End: Jump"
+        )
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setStyleSheet("font-size: 10px; color: #888;")
+        lo.addWidget(hint)
+
+        inner_splitter.addWidget(left_widget)
+
+        # 右侧面板（Panda3D 容器）
+        self._panda_container = QWidget()
+        self._panda_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self._panda_container.setMinimumSize(600, 400)
+        inner_splitter.addWidget(self._panda_container)
+
+        inner_splitter.setStretchFactor(0, 0)
+        inner_splitter.setStretchFactor(1, 1)
+        inner_splitter.setSizes([340, 1160])
+
+    # ── 嵌入 Panda3D ─────────────────────────────────────────────────
+
+    def _embed_panda(self):
+        handle = int(self._panda_container.winId())
+        self._viz._parent_window_handle = handle
+        dpr = self._panda_container.devicePixelRatio()
+        self._viz._parent_initial_size = (
+            int(self._panda_container.width() * dpr),
+            int(self._panda_container.height() * dpr),
+        )
+        self._panda_embedded = True
+
+    def _resize_panda(self):
+        if (self._viz._app is None or self._viz._app.win is None
+                or not self._panda_embedded):
+            return
+        from panda3d.core import WindowProperties
+        dpr = self._panda_container.devicePixelRatio()
+        w = int(self._panda_container.width() * dpr)
+        h = int(self._panda_container.height() * dpr)
+        if w > 0 and h > 0:
+            wp = WindowProperties()
+            wp.setSize(w, h)
+            wp.setOrigin(0, 0)
+            self._viz._app.win.requestProperties(wp)
+            self._viz.on_window_resize(w, h)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._resize_panda()
+
+    # ── 回放逻辑 ──────────────────────────────────────────────────
+
+    def _on_timer(self):
+        # 首次初始化 Panda3D
+        if not self._viz._initialised:
+            if not self._panda_embedded:
+                self._embed_panda()
+            for rw in self._replay_worlds:
+                rw.set_frame(0)
+            self._viz.setup(
+                datasets=self._datasets,
+                layout=self._layout,
+                replay_worlds=self._replay_worlds,
+                labels=self._labels,
+            )
+            for delay in (50, 200, 500):
+                QTimer.singleShot(delay, self._resize_panda)
+            self._update_info()
+            return
+
+        now = time.time()
+
+        # 自动播放
+        if not self._paused and now - self._last_advance_time >= self._frame_interval:
+            new_frame = self._current_frame + self._speed
+            if new_frame >= self._max_frames:
+                new_frame = self._max_frames - 1
+                self._paused = True
+                self._play_btn.setText("\u25b6  Play")
+                self._status_label.setText("\u23f9  END")
+                self._status_label.setStyleSheet(
+                    "color: #e74c3c; font-size: 14px; font-weight: bold;")
+            self._current_frame = new_frame
+            for rw in self._replay_worlds:
+                rw.set_frame(min(new_frame, rw.total_frames - 1))
+            self._last_advance_time = now
+
+        # 驱动 Panda3D
+        self._viz.update_all()
+        self._viz.step()
+        self._update_info()
+
+    def _step(self, delta: int):
+        """手动步进帧。"""
+        new_frame = max(0, min(self._max_frames - 1,
+                               self._current_frame + delta))
+        self._current_frame = new_frame
+        for rw in self._replay_worlds:
+            rw.set_frame(min(new_frame, rw.total_frames - 1))
+        self._frame_slider.blockSignals(True)
+        self._frame_slider.setValue(new_frame)
+        self._frame_slider.blockSignals(False)
+
+    def _update_info(self):
+        idx = self._current_frame
+        self._frame_label.setText(f"Frame: {idx} / {self._max_frames - 1}")
+        self._frame_slider.blockSignals(True)
+        self._frame_slider.setValue(idx)
+        self._frame_slider.blockSignals(False)
+
+    # ── 控件回调 ──────────────────────────────────────────────────
+
+    def _toggle_pause(self):
+        self._paused = not self._paused
+        if self._paused:
+            self._play_btn.setText("\u25b6  Play")
+            self._status_label.setText("\u23f8  PAUSED")
+            self._status_label.setStyleSheet(
+                "color: #f0a500; font-size: 14px; font-weight: bold;")
+        else:
+            if self._current_frame >= self._max_frames - 1:
+                self._current_frame = 0
+                for rw in self._replay_worlds:
+                    rw.set_frame(0)
+            self._play_btn.setText("\u23f8  Pause")
+            self._status_label.setText("\u25b6  PLAYING")
+            self._status_label.setStyleSheet(
+                "color: #2ecc71; font-size: 14px; font-weight: bold;")
+            self._last_advance_time = time.time()
+
+    def _on_frame_slider(self, value):
+        self._current_frame = value
+        for rw in self._replay_worlds:
+            rw.set_frame(min(value, rw.total_frames - 1))
+
+    def _on_fps_change(self, value):
+        self._frame_interval = 1.0 / value
+        self._fps_value.setText(f"{value} fps")
+
+    def _set_fps(self, fps: int):
+        self._frame_interval = 1.0 / fps
+        self._fps_slider.setValue(fps)
+        self._fps_value.setText(f"{fps} fps")
+
+    def _on_speed_change(self, value):
+        self._speed = value
+        self._speed_value.setText(f"x{value}")
+
+    def _set_speed(self, speed: int):
+        self._speed = speed
+        self._speed_slider.setValue(speed)
+        self._speed_value.setText(f"x{speed}")
+
+    # ── 键盘 ─────────────────────────────────────────────────────
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space:
+            self._toggle_pause()
+        elif event.key() == Qt.Key.Key_Left:
+            self._step(-1)
+        elif event.key() == Qt.Key.Key_Right:
+            self._step(1)
+        elif event.key() == Qt.Key.Key_Up:
+            self._set_speed(min(50, self._speed + 1))
+        elif event.key() == Qt.Key.Key_Down:
+            self._set_speed(max(1, self._speed - 1))
+        elif event.key() == Qt.Key.Key_Home:
+            self._current_frame = 0
+            for rw in self._replay_worlds:
+                rw.set_frame(0)
+        elif event.key() == Qt.Key.Key_End:
+            self._current_frame = self._max_frames - 1
+            for rw in self._replay_worlds:
+                rw.set_frame(min(self._max_frames - 1, rw.total_frames - 1))
+        else:
+            super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        event.accept()
+
+    # ── 公共 API ────────────────────────────────────────────────────
+
+    def run(self):
+        grid_rows, grid_cols = self._layout
+        n = len(self._datasets)
+        print("=" * 60)
+        print(f"MAS-RMFS Multi-Trajectory Replay (Panda3D)")
+        print(f"  Layout: {grid_rows}x{grid_cols}  ({n} trajectories)")
+        print("-" * 60)
+        for i, data in enumerate(self._datasets):
+            print(f"  [{i}] {self._labels[i]}")
+            print(f"      Map: {data.rows}x{data.cols}, "
+                  f"Agents: {data.num_agents}, Frames: {data.total_ticks}")
+        print("=" * 60)
+        self.show()
+        self._qt_app.exec()

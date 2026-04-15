@@ -847,3 +847,332 @@ class Panda3DVisualizer(BaseVisualizer):
             self._update_orbit_camera()
 
         return task.cont
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Multi-Replay Visualizer — 多轨迹同时回放可视化
+# ═══════════════════════════════════════════════════════════════════
+
+
+class ReplaySlot:
+    """Holds per-trajectory Panda3D state for one grid cell."""
+
+    def __init__(self, index: int, label: str, scene_root: NodePath,
+                 camera_np: NodePath, display_region,
+                 replay_world, data,
+                 pod_nodes: dict, agent_nodes: dict,
+                 agent_labels: dict, glow_nodes: dict,
+                 title_np: NodePath | None = None):
+        self.index = index
+        self.label = label
+        self.scene_root = scene_root
+        self.camera_np = camera_np
+        self.display_region = display_region
+        self.replay_world = replay_world
+        self.data = data
+        self.pod_nodes = pod_nodes
+        self.agent_nodes = agent_nodes
+        self.agent_labels = agent_labels
+        self.glow_nodes = glow_nodes
+        self.title_np = title_np
+
+
+class MultiPanda3DReplayVisualizer:
+    """
+    Multi-trajectory replay visualizer using Panda3D display regions.
+
+    Creates a single ShowBase window split into an RxC grid of
+    display regions, each rendering an independent warehouse scene.
+    多轨迹回放可视化器，使用 Panda3D 的 DisplayRegion 将单一窗口
+    分割为 RxC 网格，每个区域渲染独立的仓库场景。
+    """
+
+    DR_GAP = 0.002  # normalised gap between display regions
+
+    def __init__(self, night_mode: bool = True):
+        self._night_mode = night_mode
+        self._pal = _DARK_PALETTE if night_mode else _LIGHT_PALETTE
+        self._app: ShowBase | None = None
+        self._initialised = False
+        self._slots: list[ReplaySlot] = []
+        self._layout: tuple[int, int] = (1, 1)
+        self._parent_window_handle: int | None = None
+        self._parent_initial_size: tuple[int, int] | None = None
+
+    # ── public API ────────────────────────────────────────────────
+
+    def setup(self, datasets, layout: tuple[int, int],
+              replay_worlds, labels: list[str]):
+        """Initialise ShowBase, display regions and per-slot scenes."""
+        from panda3d.core import Camera, loadPrcFileData
+        from WorldState.map_state import CellType
+
+        self._layout = layout
+        grid_rows, grid_cols = layout
+        n = len(datasets)
+
+        # ── ShowBase ──
+        if self._parent_window_handle is not None:
+            loadPrcFileData("", "window-type none")
+            loadPrcFileData("", "win-foreground-window 0")
+
+        self._app = ShowBase()
+
+        wp = WindowProperties()
+        wp.setTitle(f"MAS-RMFS  —  Multi-Replay {grid_rows}x{grid_cols}")
+        if self._parent_window_handle is not None:
+            wp.setParentWindow(self._parent_window_handle)
+            wp.setOrigin(0, 0)
+            init_sz = self._parent_initial_size
+            if init_sz and init_sz[0] > 0 and init_sz[1] > 0:
+                wp.setSize(init_sz[0], init_sz[1])
+            else:
+                wp.setSize(1280, 800)
+        else:
+            wp.setSize(1280, 800)
+
+        if self._parent_window_handle is not None:
+            self._app.openMainWindow(props=wp)
+        else:
+            self._app.win.requestProperties(wp)
+
+        self._app.setBackgroundColor(self._pal["bg"])
+        self._app.disableMouse()
+
+        # Deactivate the default display region & camera
+        self._app.cam.node().setActive(False)
+        default_dr = self._app.win.getDisplayRegion(0)
+        default_dr.setActive(False)
+
+        # ── Build per-slot display regions & scenes ──
+        for i in range(grid_rows):
+            for j in range(grid_cols):
+                slot_idx = i * grid_cols + j
+                col_w = 1.0 / grid_cols
+                row_h = 1.0 / grid_rows
+                left = j * col_w + self.DR_GAP
+                right = (j + 1) * col_w - self.DR_GAP
+                top = 1.0 - i * row_h - self.DR_GAP
+                bottom = 1.0 - (i + 1) * row_h + self.DR_GAP
+
+                if slot_idx >= n:
+                    # Empty slot — just a background DR
+                    dr = self._app.win.makeDisplayRegion(left, right, bottom, top)
+                    dr.setSort(10)
+                    dr.setClearColorActive(True)
+                    dr.setClearColor(self._pal["bg"])
+                    dr.setClearDepthActive(True)
+                    continue
+
+                data = datasets[slot_idx]
+                rw = replay_worlds[slot_idx]
+                label = labels[slot_idx]
+                ms = rw.map_state
+                rows, cols = ms.rows, ms.cols
+
+                dr = self._app.win.makeDisplayRegion(left, right, bottom, top)
+                dr.setSort(10)
+                dr.setClearColorActive(True)
+                dr.setClearColor(self._pal["bg"])
+                dr.setClearDepthActive(True)
+
+                # ── Scene root ──
+                scene_root = NodePath(f"scene_{i}_{j}")
+
+                # ── Camera ──
+                half_w = cols * CELL / 2 + 1.0
+                half_h = rows * CELL / 2 + 1.0
+
+                lens = OrthographicLens()
+                lens.setFilmSize(half_w * 2, half_h * 2)
+                lens.setNearFar(-100, 100)
+
+                cam_node = Camera(f"cam_{i}_{j}")
+                cam_node.setLens(lens)
+                cam_np = scene_root.attachNewNode(cam_node)
+                cx = (cols - 1) * CELL / 2
+                cz = -((rows - 1) * CELL / 2)
+                cam_np.setPos(cx, -10, cz)
+                cam_np.lookAt(cx, 0, cz)
+                dr.setCamera(cam_np)
+
+                # ── Build 2D scene ──
+                pod_nodes, agent_nodes, agent_labels, glow_nodes, title_np = \
+                    self._build_slot_scene(scene_root, rw, label, rows, cols, ms)
+
+                slot = ReplaySlot(
+                    index=slot_idx, label=label,
+                    scene_root=scene_root, camera_np=cam_np,
+                    display_region=dr, replay_world=rw, data=data,
+                    pod_nodes=pod_nodes, agent_nodes=agent_nodes,
+                    agent_labels=agent_labels, glow_nodes=glow_nodes,
+                    title_np=title_np,
+                )
+                self._slots.append(slot)
+
+        self._initialised = True
+
+    def update_all(self):
+        """Update every slot from its replay world state."""
+        for slot in self._slots:
+            self._update_slot(slot)
+
+    def step(self):
+        """Pump one Panda3D frame."""
+        if self._app is not None:
+            self._app.taskMgr.step()
+
+    def on_window_resize(self, width: int, height: int):
+        """Adjust per-slot lens aspect ratios after window resize."""
+        if not self._slots or width <= 0 or height <= 0:
+            return
+        grid_rows, grid_cols = self._layout
+        slot_w = width / grid_cols
+        slot_h = height / grid_rows
+        if slot_h <= 0:
+            return
+        slot_aspect = slot_w / slot_h
+        for slot in self._slots:
+            lens = slot.camera_np.node().getLens()
+            film_h = lens.getFilmSize().getY()
+            lens.setFilmSize(film_h * slot_aspect, film_h)
+
+    # ── private helpers ──────────────────────────────────────────
+
+    def _build_slot_scene(self, scene_root: NodePath, world_state,
+                          label: str, rows: int, cols: int, ms):
+        """Build a complete 2D warehouse scene under *scene_root*.
+
+        Returns (pod_nodes, agent_nodes, agent_labels, glow_nodes, title_np).
+        """
+        from WorldState.map_state import CellType
+
+        # ── static grid ──
+        static_root = scene_root.attachNewNode("static_grid")
+        cm = CardMaker("cell")
+        cm.setFrame(-CELL / 2 + PAD, CELL / 2 - PAD,
+                     -CELL / 2 + PAD, CELL / 2 - PAD)
+        for r in range(rows):
+            for c in range(cols):
+                cell = ms.grid[r][c]
+                if cell == CellType.OBSTACLE:
+                    clr = self._pal["obstacle"]
+                elif cell == CellType.STATION:
+                    clr = self._pal["station"]
+                elif cell == CellType.POD_HOME:
+                    clr = self._pal["pod_home"]
+                else:
+                    clr = self._pal["free"]
+                np = static_root.attachNewNode(cm.generate())
+                np.setPos(c * CELL, 0, -r * CELL)
+                np.setColor(clr)
+
+        # ── station labels ──
+        for sid, (sr, sc) in ms.station_positions.items():
+            tn = TextNode(f"station_{sid}")
+            tn.setText(f"S{sid}")
+            tn.setTextColor(1, 0.42, 0.50, 1)
+            tn.setAlign(TextNode.ACenter)
+            tn.setCardColor(0, 0, 0, 0.5)
+            tn.setCardAsMargin(0.05, 0.05, 0.05, 0.05)
+            tn.setCardDecal(True)
+            tnp = static_root.attachNewNode(tn)
+            tnp.setPos(sc * CELL, -0.1, -sr * CELL + CELL * 0.35)
+            tnp.setScale(0.25)
+
+        # ── title label (filename overlay) ──
+        cx = (cols - 1) * CELL / 2
+        half_h = rows * CELL / 2 + 1.0
+        title_tn = TextNode("title")
+        title_tn.setText(label)
+        title_tn.setTextColor(0.9, 0.9, 0.9, 0.85)
+        title_tn.setAlign(TextNode.ACenter)
+        title_tn.setShadow(0.04, 0.04)
+        title_tn.setShadowColor(0, 0, 0, 0.7)
+        title_np = scene_root.attachNewNode(title_tn)
+        title_np.setPos(cx, -0.9, half_h - 0.5)
+        title_np.setScale(0.35)
+
+        # ── pod nodes (dynamic) ──
+        pod_root = scene_root.attachNewNode("pods")
+        pod_nodes: dict[int, NodePath] = {}
+        for pod in world_state.pod_state.pods.values():
+            pr, pc = pod.current_position
+            pod_cm = CardMaker("pod")
+            s = CELL * 0.35
+            pod_cm.setFrame(-s, s, -s, s)
+            pnp = pod_root.attachNewNode(pod_cm.generate())
+            pnp.setPos(pc * CELL, -0.2, -pr * CELL)
+            pnp.setColor(self._pal["pod"])
+            pnp.setTransparency(TransparencyAttrib.MAlpha)
+            pod_nodes[pod.pod_id] = pnp
+
+        # ── agent nodes (dynamic) ──
+        agent_root = scene_root.attachNewNode("agents")
+        agent_nodes: dict[int, NodePath] = {}
+        agent_labels: dict[int, NodePath] = {}
+        glow_nodes: dict[int, NodePath] = {}
+
+        for agent in world_state.agents:
+            clr = _ROBOT_COLOURS[agent.agent_id % len(_ROBOT_COLOURS)]
+
+            # Glow card
+            glow_cm = CardMaker("glow")
+            g = CELL * 0.55
+            glow_cm.setFrame(-g, g, -g, g)
+            gnp = agent_root.attachNewNode(glow_cm.generate())
+            gnp.setColor(clr[0], clr[1], clr[2], 0.25)
+            gnp.setTransparency(TransparencyAttrib.MAlpha)
+            gnp.hide()
+            glow_nodes[agent.agent_id] = gnp
+
+            # Agent card
+            agent_cm = CardMaker("agent")
+            a = CELL * 0.4
+            agent_cm.setFrame(-a, a, -a, a)
+            anp = agent_root.attachNewNode(agent_cm.generate())
+            anp.setColor(clr)
+            agent_nodes[agent.agent_id] = anp
+
+            # Label
+            tn = TextNode(f"agent_{agent.agent_id}")
+            tn.setText(str(agent.agent_id))
+            tn.setTextColor(1, 1, 1, 1)
+            tn.setAlign(TextNode.ACenter)
+            lnp = agent_root.attachNewNode(tn)
+            lnp.setScale(0.22)
+            agent_labels[agent.agent_id] = lnp
+
+        return pod_nodes, agent_nodes, agent_labels, glow_nodes, title_np
+
+    def _update_slot(self, slot: ReplaySlot):
+        """Update pods / agents / glow for a single slot."""
+        ws = slot.replay_world
+
+        # Pods
+        for pod in ws.pod_state.pods.values():
+            np = slot.pod_nodes.get(pod.pod_id)
+            if np is None:
+                continue
+            if pod.is_carried:
+                np.hide()
+            else:
+                np.show()
+                pr, pc = pod.current_position
+                np.setPos(pc * CELL, -0.2, -pr * CELL)
+
+        # Agents
+        for agent in ws.agents:
+            aid = agent.agent_id
+            r, c = agent.position
+            x = c * CELL
+            z = -r * CELL
+
+            slot.agent_nodes[aid].setPos(x, -0.5, z)
+            slot.glow_nodes[aid].setPos(x, -0.4, z)
+            slot.agent_labels[aid].setPos(x, -0.6, z + CELL * 0.02)
+
+            if agent.carried_pod_id is not None:
+                slot.glow_nodes[aid].show()
+            else:
+                slot.glow_nodes[aid].hide()

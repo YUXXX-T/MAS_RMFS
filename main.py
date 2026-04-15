@@ -11,6 +11,7 @@ MAS-RMFS：多智能体机器人移动履行系统仿真
 """
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -73,15 +74,22 @@ def main():
     # --- 轨迹回放参数 ---
     parser.add_argument(
         "--replay",
-        type=str,
-        default="",
-        help="加载轨迹数据文件并使用 Panda3D 回放（跳过仿真）。",
+        nargs='+',
+        default=[],
+        metavar="FILE",
+        help="加载一个或多个轨迹数据文件并使用 Panda3D 回放（跳过仿真）。",
     )
     parser.add_argument(
         "--replay-fps",
         type=int,
         default=10,
         help="回放帧率，默认 10fps。范围 1-60。",
+    )
+    parser.add_argument(
+        "--replay-layout",
+        type=str,
+        default="",
+        help="多轨迹回放的网格布局，如 '2x1'、'1x2'、'2x2'。不指定则自动计算。",
     )
 
     args = parser.parse_args()
@@ -91,23 +99,74 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     if args.replay:
         from TrajectoryRecord import TrajectoryData
-        from Visualization.panda3d_visualizer import Panda3DVisualizer
-        from Visualization.ui import ReplayUI
 
         logger = SimLogger("Main")
-        logger.info(f"Loading trajectory: {args.replay}")
-        data = TrajectoryData.load(args.replay)
-        logger.info(f"  Map: {data.rows}x{data.cols}, Agents: {data.num_agents}, "
-                     f"Frames: {data.total_ticks}")
+        replay_files = args.replay
+        n = len(replay_files)
 
-        visualizer = Panda3DVisualizer(
-            view_mode="2d",
-            use_gpu=False,
-            night_mode=True,
-        )
-        ui = ReplayUI(data=data, visualizer=visualizer, night_mode=True,
-                      initial_fps=args.replay_fps)
-        ui.run()
+        # 加载所有轨迹文件
+        datasets = []
+        labels = []
+        for path in replay_files:
+            logger.info(f"Loading trajectory: {path}")
+            data = TrajectoryData.load(path)
+            logger.info(f"  Map: {data.rows}x{data.cols}, Agents: {data.num_agents}, "
+                         f"Frames: {data.total_ticks}")
+            datasets.append(data)
+            labels.append(os.path.basename(path))
+
+        # 解析或自动计算布局
+        def _auto_layout(count: int) -> tuple:
+            if count == 1:
+                return (1, 1)
+            if count == 2:
+                return (1, 2)
+            cols = math.ceil(math.sqrt(count))
+            rows = math.ceil(count / cols)
+            return (rows, cols)
+
+        if args.replay_layout:
+            parts = args.replay_layout.lower().split('x')
+            if len(parts) != 2:
+                logger.error(f"Invalid layout format: '{args.replay_layout}'. "
+                             f"Expected 'RxC', e.g. '2x1'.")
+                sys.exit(1)
+            layout = (int(parts[0]), int(parts[1]))
+            if layout[0] * layout[1] < n:
+                logger.error(f"Layout {layout[0]}x{layout[1]} has "
+                             f"{layout[0]*layout[1]} slots but {n} files given.")
+                sys.exit(1)
+        else:
+            layout = _auto_layout(n)
+
+        if n == 1 and not args.replay_layout:
+            # 单文件回放：使用原有的 ReplayUI（向后兼容）
+            from Visualization.panda3d_visualizer import Panda3DVisualizer
+            from Visualization.ui import ReplayUI
+
+            visualizer = Panda3DVisualizer(
+                view_mode="2d", use_gpu=False, night_mode=True,
+            )
+            ui = ReplayUI(data=datasets[0], visualizer=visualizer,
+                          night_mode=True, initial_fps=args.replay_fps)
+            ui.run()
+        else:
+            # 多文件回放：使用 MultiReplayUI
+            from Visualization.panda3d_visualizer import MultiPanda3DReplayVisualizer
+            from Visualization.ui import MultiReplayUI
+
+            logger.info(f"Multi-replay: layout={layout[0]}x{layout[1]}, "
+                         f"files={n}")
+            visualizer = MultiPanda3DReplayVisualizer(night_mode=True)
+            ui = MultiReplayUI(
+                datasets=datasets,
+                labels=labels,
+                layout=layout,
+                visualizer=visualizer,
+                night_mode=True,
+                initial_fps=args.replay_fps,
+            )
+            ui.run()
         return
 
     # ═══════════════════════════════════════════════════════════════
