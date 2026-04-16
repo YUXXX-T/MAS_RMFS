@@ -875,6 +875,7 @@ class ReplaySlot:
         self.agent_labels = agent_labels
         self.glow_nodes = glow_nodes
         self.title_np = title_np
+        self.original_dr_dims: tuple[float, float, float, float] | None = None
 
 
 class MultiPanda3DReplayVisualizer:
@@ -898,6 +899,9 @@ class MultiPanda3DReplayVisualizer:
         self._layout: tuple[int, int] = (1, 1)
         self._parent_window_handle: int | None = None
         self._parent_initial_size: tuple[int, int] | None = None
+        self._empty_drs: list = []
+        self._focused_index: int | None = None
+        self._on_click_callback = None  # callable(slot_index: int) | None
 
     # ── public API ────────────────────────────────────────────────
 
@@ -962,6 +966,7 @@ class MultiPanda3DReplayVisualizer:
                     dr.setClearColorActive(True)
                     dr.setClearColor(self._pal["bg"])
                     dr.setClearDepthActive(True)
+                    self._empty_drs.append(dr)
                     continue
 
                 data = datasets[slot_idx]
@@ -1008,7 +1013,11 @@ class MultiPanda3DReplayVisualizer:
                     agent_labels=agent_labels, glow_nodes=glow_nodes,
                     title_np=title_np,
                 )
+                slot.original_dr_dims = (left, right, bottom, top)
                 self._slots.append(slot)
+
+        # ── 注册鼠标点击事件 ──
+        self._app.accept('mouse1', self._on_mouse_click)
 
         self._initialised = True
 
@@ -1026,6 +1035,18 @@ class MultiPanda3DReplayVisualizer:
         """Adjust per-slot lens aspect ratios after window resize."""
         if not self._slots or width <= 0 or height <= 0:
             return
+
+        if self._focused_index is not None:
+            # Focus mode: single slot fills the full window
+            for slot in self._slots:
+                if slot.index == self._focused_index:
+                    aspect = width / height
+                    lens = slot.camera_np.node().getLens()
+                    film_h = lens.getFilmSize().getY()
+                    lens.setFilmSize(film_h * aspect, film_h)
+                    return
+            return
+
         grid_rows, grid_cols = self._layout
         slot_w = width / grid_cols
         slot_h = height / grid_rows
@@ -1036,6 +1057,59 @@ class MultiPanda3DReplayVisualizer:
             lens = slot.camera_np.node().getLens()
             film_h = lens.getFilmSize().getY()
             lens.setFilmSize(film_h * slot_aspect, film_h)
+
+    # ── focus / unfocus ─────────────────────────────────────────
+
+    def focus_slot(self, index: int):
+        """Expand one slot to fill the full window; hide all others."""
+        self._focused_index = index
+        gap = self.DR_GAP
+        for slot in self._slots:
+            if slot.index == index:
+                slot.display_region.setDimensions(gap, 1.0 - gap, gap, 1.0 - gap)
+                if slot.title_np:
+                    slot.title_np.hide()
+            else:
+                slot.display_region.setActive(False)
+        for dr in self._empty_drs:
+            dr.setActive(False)
+
+    def unfocus(self):
+        """Restore grid layout — all slots visible at original positions."""
+        self._focused_index = None
+        for slot in self._slots:
+            if slot.original_dr_dims:
+                l, r, b, t = slot.original_dr_dims
+                slot.display_region.setDimensions(l, r, b, t)
+            slot.display_region.setActive(True)
+            if slot.title_np:
+                slot.title_np.show()
+        for dr in self._empty_drs:
+            dr.setActive(True)
+
+    def _on_mouse_click(self):
+        """Panda3D 鼠标点击处理：将点击位置映射到 slot 并调用回调。"""
+        if self._focused_index is not None:
+            return  # 聚焦模式下忽略点击
+        if self._app is None or not self._app.mouseWatcherNode.hasMouse():
+            return
+        # Panda3D mouseWatcher 坐标: x in [-1,1], y in [-1,1]
+        mx = self._app.mouseWatcherNode.getMouseX()
+        my = self._app.mouseWatcherNode.getMouseY()
+        # 转换为归一化窗口坐标 [0,1], (0,0)=左下, (1,1)=右上
+        nx = (mx + 1.0) / 2.0
+        ny = (my + 1.0) / 2.0
+
+        # 查找点击落在哪个 slot 的 display region 内
+        for slot in self._slots:
+            dims = slot.original_dr_dims
+            if dims is None:
+                continue
+            left, right, bottom, top = dims
+            if left <= nx <= right and bottom <= ny <= top:
+                if self._on_click_callback is not None:
+                    self._on_click_callback(slot.index)
+                return
 
     # ── private helpers ──────────────────────────────────────────
 

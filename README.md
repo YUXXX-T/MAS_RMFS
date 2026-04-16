@@ -478,6 +478,7 @@ python main.py --replay a.traj.json.gz b.traj.json.gz c.traj.json.gz --replay-la
 
 # 2x2 网格布局
 python main.py --replay f1.traj.json.gz f2.traj.json.gz f3.traj.json.gz f4.traj.json.gz --replay-layout 2x2
+& f:/Anaconda3/envs/multi_robot/python.exe f:/MAS_RMFS/main.py --replay .\TrajectoryRecord\Trajectory_run_first_test.traj.json.gz .\TrajectoryRecord\Trajectory_run_second_test.traj.json.gz .\TrajectoryRecord\Trajectory_run_third_test.traj.json.gz .\TrajectoryRecord\Trajectory_run_fourth_test.traj.json.gz --replay-layout 2x2  --replay-fps 5
 ```
 
 > 单文件使用 `ReplayUI`；多文件使用 `MultiReplayUI`，所有轨迹在同一窗口的 RxC 网格中独立渲染，共享播放控件。
