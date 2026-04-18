@@ -55,12 +55,6 @@ from panda3d.core import (
     Point3,
     Vec3,
     Point2,
-    GeomVertexFormat,
-    GeomVertexData,
-    GeomVertexWriter,
-    Geom,
-    GeomNode,
-    GeomTriangles,
 )
 
 if TYPE_CHECKING:
@@ -162,81 +156,69 @@ def _make_box(name: str, sx: float, sy: float, sz: float) -> NodePath:
 
 
 _WHEEL_CLR = LVecBase4f(0.25, 0.25, 0.28, 1)
+_JACKAL_BASE_CLR = LVecBase4f(0.2, 0.2, 0.2, 1)
 
 
-def _make_cylinder(name: str, radius: float, height: float,
-                   segments: int = 12) -> NodePath:
-    """Build a cylinder centred at origin, axis along Z, with UV coords."""
-    fmt = GeomVertexFormat.getV3t2()
-    vdata = GeomVertexData(name, fmt, Geom.UHStatic)
-    n = segments
-    vdata.setNumRows(n * 2 + 2)
-    vertex = GeomVertexWriter(vdata, "vertex")
-    texcoord = GeomVertexWriter(vdata, "texcoord")
-
-    for i in range(n):
-        a = 2.0 * math.pi * i / n
-        x = radius * math.cos(a)
-        y = radius * math.sin(a)
-        u = i / n
-        vertex.addData3(x, y, height / 2)
-        texcoord.addData2(u, 1)
-        vertex.addData3(x, y, -height / 2)
-        texcoord.addData2(u, 0)
-
-    vertex.addData3(0, 0, height / 2)
-    texcoord.addData2(0.5, 0.5)
-    vertex.addData3(0, 0, -height / 2)
-    texcoord.addData2(0.5, 0.5)
-
-    tris = GeomTriangles(Geom.UHStatic)
-    tc = n * 2
-    bc = n * 2 + 1
-    for i in range(n):
-        ni = (i + 1) % n
-        t0, b0 = i * 2, i * 2 + 1
-        t1, b1 = ni * 2, ni * 2 + 1
-        tris.addVertices(t0, b0, b1)
-        tris.addVertices(t0, b1, t1)
-        tris.addVertices(tc, t0, t1)
-        tris.addVertices(bc, b1, b0)
-
-    geom = Geom(vdata)
-    geom.addPrimitive(tris)
-    node = GeomNode(name)
-    node.addGeom(geom)
-    return NodePath(node)
-
-
-def _make_robot(name: str, wheel_model=None) -> NodePath:
-    """Build a robot model: box body + 4 wheels."""
+def _make_robot(name: str, base_model=None, fenders_model=None,
+                wheel_model=None, rm_cfg=None) -> NodePath:
+    """Build a robot model: Jackal STL body if available, else box fallback."""
     root = NodePath(name)
 
-    body_w = CELL * 0.50
-    body_d = CELL * 0.50
-    body_h = CELL * 0.30
-    wheel_r = CELL * 0.07
+    if base_model is not None and fenders_model is not None:
+        offset_z = rm_cfg.body_offset_z if rm_cfg else 0.008
+        hpr = rm_cfg.body_hpr if rm_cfg else (90, 90, 90)
+        wheel_r = rm_cfg.wheel_radius if rm_cfg else 0.08
+        wheel_pos = rm_cfg.wheel_positions if rm_cfg else [
+            (0.18, 0.14, 0.08), (0.18, -0.14, 0.08),
+            (-0.18, 0.14, 0.08), (-0.18, -0.14, 0.08)]
 
-    body = _make_box(name + "_body", body_w, body_d, body_h)
-    body.reparentTo(root)
-    body.setPos(0, 0, wheel_r + body_h / 2)
+        base_pivot = root.attachNewNode(name + "_base")
+        base_pivot.setPos(0, 0, offset_z)
+        base_pivot.setHpr(*hpr)
+        b = base_model.copyTo(base_pivot)
+        b.setColor(_JACKAL_BASE_CLR)
 
-    wx = body_w * 0.42
-    wy = body_d * 0.42
-    for i, (dx, dy) in enumerate([(-wx, -wy), (wx, -wy), (-wx, wy), (wx, wy)]):
-        if wheel_model is not None:
-            pivot = root.attachNewNode(f"{name}_wp{i}")
-            pivot.setScale(wheel_r / 217.0)
-            pivot.setR(90)
-            pivot.setPos(dx, dy, wheel_r)
-            w = wheel_model.copyTo(pivot)
-            w.setPos(0, 0, -80.5)
-        else:
-            w = _make_cylinder(f"{name}_w{i}", wheel_r, CELL * 0.05)
-            w.reparentTo(root)
-            w.setR(90)
-            w.setPos(dx, dy, wheel_r)
-            w.setColor(_WHEEL_CLR)
+        fenders_pivot = root.attachNewNode(name + "_body")
+        fenders_pivot.setPos(0, 0, offset_z)
+        fenders_pivot.setHpr(*hpr)
+        fenders_model.copyTo(fenders_pivot)
+
+        for i, (wx, wy, wz) in enumerate(wheel_pos):
+            if wheel_model is not None:
+                pivot = root.attachNewNode(f"{name}_wp{i}")
+                pivot.setPos(wx, wy, wz)
+                pivot.setScale(wheel_r / 217.0)
+                pivot.setR(90)
+                w = wheel_model.copyTo(pivot)
+                w.setPos(0, 0, -80.5)
+            else:
+                w = _make_box(f"{name}_w{i}", 0.04, 0.04, 0.02)
+                w.reparentTo(root)
+                w.setPos(wx, wy, wz)
+                w.setColor(_WHEEL_CLR)
+    else:
+        body_w = CELL * 0.50
+        body_d = CELL * 0.50
+        body_h = CELL * 0.30
+        wheel_r = CELL * 0.07
+        body = _make_box(name + "_body", body_w, body_d, body_h)
+        body.reparentTo(root)
+        body.setPos(0, 0, wheel_r + body_h / 2)
+        wx = body_w * 0.42
+        wy = body_d * 0.42
+        for i, (dx, dy) in enumerate([(-wx, -wy), (wx, -wy), (-wx, wy), (wx, wy)]):
+            if wheel_model is not None:
+                pivot = root.attachNewNode(f"{name}_wp{i}")
+                pivot.setScale(wheel_r / 217.0)
+                pivot.setR(90)
+                pivot.setPos(dx, dy, wheel_r)
+                w = wheel_model.copyTo(pivot)
+                w.setPos(0, 0, -80.5)
+            else:
+                w = _make_box(f"{name}_w{i}", 0.05, 0.05, 0.03)
+                w.reparentTo(root)
+                w.setPos(dx, dy, wheel_r)
+                w.setColor(_WHEEL_CLR)
 
     return root
 
@@ -254,11 +236,13 @@ class Panda3DVisualizer(BaseVisualizer):
     """
 
     def __init__(self, view_mode: str = "2d", use_gpu: bool = False,
-                 night_mode: bool = True, robot_label_scale: float = 0.25):
+                 night_mode: bool = True, robot_label_scale: float = 0.25,
+                 robot_model_cfg=None):
         self._view_mode = view_mode.lower()
         self._use_gpu = use_gpu
         self._night_mode = night_mode
         self._robot_label_scale = robot_label_scale
+        self._robot_model_cfg = robot_model_cfg
         self._pal = _DARK_PALETTE if night_mode else _LIGHT_PALETTE
         self._app: ShowBase | None = None
         self._initialised = False
@@ -487,9 +471,21 @@ class Panda3DVisualizer(BaseVisualizer):
         agent_root = self._app.render.attachNewNode("agents")
 
         wheel_model = None
-        if is_3d:
+        base_model = None
+        fenders_model = None
+        rm_cfg = self._robot_model_cfg
+        use_model = rm_cfg.use_model if rm_cfg else True
+        if is_3d and use_model:
             from panda3d.core import Filename
+            from Visualization.stl_loader import load_stl
             vis_dir = os.path.dirname(__file__)
+
+            base_stl = os.path.join(vis_dir, "models", "jackal", "jackal-base.stl")
+            fenders_stl = os.path.join(vis_dir, "models", "jackal", "jackal-fenders.stl")
+            if os.path.isfile(base_stl) and os.path.isfile(fenders_stl):
+                base_model = load_stl(base_stl, "jackal_base")
+                fenders_model = load_stl(fenders_stl, "jackal_fenders")
+
             egg_path = os.path.join(
                 vis_dir, "models", "car_wheel", "meshes", "car_wheel.egg",
             )
@@ -521,7 +517,10 @@ class Panda3DVisualizer(BaseVisualizer):
                 self._glow_nodes[agent.agent_id] = gnp
 
                 # Agent model (body + wheels)
-                anp = _make_robot("agent", wheel_model=wheel_model)
+                anp = _make_robot("agent", base_model=base_model,
+                                  fenders_model=fenders_model,
+                                  wheel_model=wheel_model,
+                                  rm_cfg=rm_cfg)
                 anp.reparentTo(agent_root)
                 body_np = anp.find("**/agent_body")
                 if body_np:

@@ -82,6 +82,23 @@ class PolicyConfig:
 
 
 @dataclass
+class RobotModelConfig:
+    """3D 机器人模型参数。"""
+    use_model: bool = True
+    body_offset_z: float = 0.008
+    body_hpr: Tuple[float, float, float] = (90.0, 90.0, 90.0)
+    wheel_radius: float = 0.08
+    wheel_positions: List[Tuple[float, float, float]] = field(
+        default_factory=lambda: [
+            (0.18, 0.14, 0.08),
+            (0.18, -0.14, 0.08),
+            (-0.18, 0.14, 0.08),
+            (-0.18, -0.14, 0.08),
+        ]
+    )
+
+
+@dataclass
 class SimulationParams:
     """仿真级参数。"""
     order_interval: int = 5           # Generate new order every N ticks
@@ -111,6 +128,7 @@ class SimulationConfig:
     simulation: SimulationParams = field(default_factory=SimulationParams)
     policies: PolicyConfig = field(default_factory=PolicyConfig)
     pods: PodsConfig = field(default_factory=PodsConfig)
+    robot_model: RobotModelConfig = field(default_factory=RobotModelConfig)
 
 
 def load_config(path: str) -> SimulationConfig:
@@ -220,8 +238,19 @@ def load_config(path: str) -> SimulationConfig:
         items_per_sku=pods_raw.get("items_per_sku", 20),
     )
 
+    # --- Parse robot model config ---
+    rm_raw = raw.get("robot_model", {})
+    _default_wp = RobotModelConfig().wheel_positions
+    robot_model_config = RobotModelConfig(
+        use_model=rm_raw.get("use_model", True),
+        body_offset_z=rm_raw.get("body_offset_z", 0.008),
+        body_hpr=tuple(rm_raw.get("body_hpr", [90, 90, 90])),
+        wheel_radius=rm_raw.get("wheel_radius", 0.08),
+        wheel_positions=[tuple(p) for p in rm_raw.get("wheel_positions", _default_wp)],
+    )
+
     return SimulationConfig(
         map=map_config, robots=robot_config,
         simulation=sim_params, policies=policy_config,
-        pods=pods_config,
+        pods=pods_config, robot_model=robot_model_config,
     )

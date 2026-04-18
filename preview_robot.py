@@ -1,120 +1,87 @@
 """
-Preview the robot model (body + 4 wheels) in a standalone Panda3D window.
+Preview the Jackal robot model in a standalone Panda3D window.
 Left-drag: orbit, right-drag: pan, scroll: zoom.
 """
 
 import math
 import os
+import sys
 
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import (
-    PerspectiveLens, CardMaker, TextNode, LVecBase4f,
-    TransparencyAttrib, AntialiasAttrib, NodePath, LineSegs,
-    GeomVertexFormat, GeomVertexData, GeomVertexWriter,
-    Geom, GeomNode, GeomTriangles, Filename,
+    PerspectiveLens, TextNode, LVecBase4f,
+    AntialiasAttrib, NodePath, LineSegs, Filename,
 )
 
-CELL = 1.0
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from Visualization.stl_loader import load_stl
+from Config.config_loader import load_config
+
+_JACKAL_BASE_CLR = LVecBase4f(0.2, 0.2, 0.2, 1)
+_JACKAL_FENDER_CLR = LVecBase4f(0.12, 0.47, 0.71, 1)
 _WHEEL_CLR = LVecBase4f(0.25, 0.25, 0.28, 1)
-_BODY_CLR = LVecBase4f(0.12, 0.47, 0.71, 1)
 
 
 def _make_box(name, sx, sy, sz):
+    from panda3d.core import CardMaker
     root = NodePath(name)
     root.setTwoSided(True)
     hx, hy, hz = sx / 2, sy / 2, sz / 2
-
-    cm_top = CardMaker(name + "_top")
-    cm_top.setFrame(-hx, hx, -hy, hy)
-    top = root.attachNewNode(cm_top.generate())
+    cm = CardMaker(name + "_top")
+    cm.setFrame(-hx, hx, -hy, hy)
+    top = root.attachNewNode(cm.generate())
     top.setP(-90); top.setPos(0, 0, hz)
-    bot = root.attachNewNode(cm_top.generate())
+    bot = root.attachNewNode(cm.generate())
     bot.setP(90); bot.setPos(0, 0, -hz)
-
-    cm_fwd = CardMaker(name + "_fwd")
-    cm_fwd.setFrame(-hx, hx, -hz, hz)
-    front = root.attachNewNode(cm_fwd.generate())
+    cm2 = CardMaker(name + "_fwd")
+    cm2.setFrame(-hx, hx, -hz, hz)
+    front = root.attachNewNode(cm2.generate())
     front.setPos(0, -hy, 0)
-    back = root.attachNewNode(cm_fwd.generate())
+    back = root.attachNewNode(cm2.generate())
     back.setH(180); back.setPos(0, hy, 0)
-
-    cm_side = CardMaker(name + "_side")
-    cm_side.setFrame(-hy, hy, -hz, hz)
-    left = root.attachNewNode(cm_side.generate())
+    cm3 = CardMaker(name + "_side")
+    cm3.setFrame(-hy, hy, -hz, hz)
+    left = root.attachNewNode(cm3.generate())
     left.setH(90); left.setPos(-hx, 0, 0)
-    right = root.attachNewNode(cm_side.generate())
+    right = root.attachNewNode(cm3.generate())
     right.setH(-90); right.setPos(hx, 0, 0)
     return root
 
 
-def _make_cylinder(name, radius, height, segments=12):
-    fmt = GeomVertexFormat.getV3t2()
-    vdata = GeomVertexData(name, fmt, Geom.UHStatic)
-    n = segments
-    vdata.setNumRows(n * 2 + 2)
-    vertex = GeomVertexWriter(vdata, "vertex")
-    texcoord = GeomVertexWriter(vdata, "texcoord")
-
-    for i in range(n):
-        a = 2.0 * math.pi * i / n
-        x = radius * math.cos(a)
-        y = radius * math.sin(a)
-        u = i / n
-        vertex.addData3(x, y, height / 2)
-        texcoord.addData2(u, 1)
-        vertex.addData3(x, y, -height / 2)
-        texcoord.addData2(u, 0)
-
-    vertex.addData3(0, 0, height / 2)
-    texcoord.addData2(0.5, 0.5)
-    vertex.addData3(0, 0, -height / 2)
-    texcoord.addData2(0.5, 0.5)
-
-    tris = GeomTriangles(Geom.UHStatic)
-    tc, bc = n * 2, n * 2 + 1
-    for i in range(n):
-        ni = (i + 1) % n
-        t0, b0 = i * 2, i * 2 + 1
-        t1, b1 = ni * 2, ni * 2 + 1
-        tris.addVertices(t0, b0, b1)
-        tris.addVertices(t0, b1, t1)
-        tris.addVertices(tc, t0, t1)
-        tris.addVertices(bc, b1, b0)
-
-    geom = Geom(vdata)
-    geom.addPrimitive(tris)
-    node = GeomNode(name)
-    node.addGeom(geom)
-    return NodePath(node)
-
-
-def _make_robot(name, wheel_model=None):
+def _make_robot(name, rm_cfg, base_model=None, fenders_model=None, wheel_model=None):
     root = NodePath(name)
-    body_w = CELL * 0.50
-    body_d = CELL * 0.50
-    body_h = CELL * 0.30
-    wheel_r = CELL * 0.07
 
-    body = _make_box(name + "_body", body_w, body_d, body_h)
-    body.reparentTo(root)
-    body.setPos(0, 0, wheel_r + body_h / 2)
+    if base_model is not None and fenders_model is not None:
+        offset_z = rm_cfg.body_offset_z
+        hpr = rm_cfg.body_hpr
+        wheel_r = rm_cfg.wheel_radius
+        wheel_pos = rm_cfg.wheel_positions
 
-    wx = body_w * 0.42
-    wy = body_d * 0.42
-    for i, (dx, dy) in enumerate([(-wx, -wy), (wx, -wy), (-wx, wy), (wx, wy)]):
-        if wheel_model is not None:
-            pivot = root.attachNewNode(f"{name}_wp{i}")
-            pivot.setScale(wheel_r / 217.0)
-            pivot.setR(90)
-            pivot.setPos(dx, dy, wheel_r)
-            w = wheel_model.copyTo(pivot)
-            w.setPos(0, 0, -80.5)
-        else:
-            w = _make_cylinder(f"{name}_w{i}", wheel_r, CELL * 0.05)
-            w.reparentTo(root)
-            w.setR(90)
-            w.setPos(dx, dy, wheel_r)
-            w.setColor(_WHEEL_CLR)
+        base_pivot = root.attachNewNode(name + "_base")
+        base_pivot.setPos(0, 0, offset_z)
+        base_pivot.setHpr(*hpr)
+        b = base_model.copyTo(base_pivot)
+        b.setColor(_JACKAL_BASE_CLR)
+
+        fenders_pivot = root.attachNewNode(name + "_fenders")
+        fenders_pivot.setPos(0, 0, offset_z)
+        fenders_pivot.setHpr(*hpr)
+        f = fenders_model.copyTo(fenders_pivot)
+        f.setColor(_JACKAL_FENDER_CLR)
+
+        for i, (wx, wy, wz) in enumerate(wheel_pos):
+            if wheel_model is not None:
+                pivot = root.attachNewNode(f"{name}_wp{i}")
+                pivot.setPos(wx, wy, wz)
+                pivot.setScale(wheel_r / 217.0)
+                pivot.setR(90)
+                w = wheel_model.copyTo(pivot)
+                w.setPos(0, 0, -80.5)
+    else:
+        body = _make_box(name + "_body", 0.50, 0.50, 0.30)
+        body.reparentTo(root)
+        body.setPos(0, 0, 0.07 + 0.15)
+        body.setColor(_JACKAL_FENDER_CLR)
     return root
 
 
@@ -127,14 +94,13 @@ class PreviewApp(ShowBase):
         self.disableMouse()
         lens = PerspectiveLens()
         lens.setFov(45)
-        lens.setNearFar(0.1, 100)
+        lens.setNearFar(0.01, 100)
         self.cam.node().setLens(lens)
 
-        # orbit state
-        self._pivot = (0.0, 0.0, 0.15)
+        self._pivot = (0.0, 0.0, 0.1)
         self._heading = -135.0
         self._pitch = 25.0
-        self._dist = 1.5
+        self._dist = 0.8
         self._mouse_btn = 0
         self._mouse_prev = None
         self._update_camera()
@@ -151,36 +117,42 @@ class PreviewApp(ShowBase):
         ls = LineSegs("grid")
         ls.setColor(0.25, 0.25, 0.40, 0.5)
         ls.setThickness(1.0)
-        for i in range(-2, 3):
-            v = i * 0.25
-            ls.moveTo(-0.5, v, 0); ls.drawTo(0.5, v, 0)
-            ls.moveTo(v, -0.5, 0); ls.drawTo(v, 0.5, 0)
+        for i in range(-4, 5):
+            v = i * 0.1
+            ls.moveTo(-0.4, v, 0); ls.drawTo(0.4, v, 0)
+            ls.moveTo(v, -0.4, 0); ls.drawTo(v, 0.4, 0)
         self.render.attachNewNode(ls.create())
 
-        # wheel model
-        wheel_model = None
+        # load config
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        egg_path = os.path.join(
-            base_dir, "Visualization", "models", "car_wheel",
-            "meshes", "car_wheel.egg",
-        )
-        tex_path = os.path.join(
-            base_dir, "Visualization", "models", "car_wheel",
-            "materials", "textures", "car_wheel.png",
-        )
-        if os.path.isfile(egg_path):
-            wheel_model = self.loader.loadModel(Filename.fromOsSpecific(egg_path))
-            if os.path.isfile(tex_path):
-                tex = self.loader.loadTexture(Filename.fromOsSpecific(tex_path))
-                wheel_model.setTexture(tex, 1)
-                wheel_model.setMaterialOff()
+        cfg_path = os.path.join(base_dir, "Config", "default_config.json")
+        cfg = load_config(cfg_path)
+        rm_cfg = cfg.robot_model
 
-        # robot model
-        robot = _make_robot("robot", wheel_model=wheel_model)
+        # load models
+        vis_dir = os.path.join(base_dir, "Visualization")
+        base_model = None
+        fenders_model = None
+        wheel_model = None
+
+        if rm_cfg.use_model:
+            base_stl = os.path.join(vis_dir, "models", "jackal", "jackal-base.stl")
+            fenders_stl = os.path.join(vis_dir, "models", "jackal", "jackal-fenders.stl")
+            if os.path.isfile(base_stl) and os.path.isfile(fenders_stl):
+                base_model = load_stl(base_stl, "jackal_base")
+                fenders_model = load_stl(fenders_stl, "jackal_fenders")
+
+            egg_path = os.path.join(vis_dir, "models", "car_wheel", "meshes", "car_wheel.egg")
+            tex_path = os.path.join(vis_dir, "models", "car_wheel", "materials", "textures", "car_wheel.png")
+            if os.path.isfile(egg_path):
+                wheel_model = self.loader.loadModel(Filename.fromOsSpecific(egg_path))
+                if os.path.isfile(tex_path):
+                    tex = self.loader.loadTexture(Filename.fromOsSpecific(tex_path))
+                    wheel_model.setTexture(tex, 1)
+                    wheel_model.setMaterialOff()
+
+        robot = _make_robot("robot", rm_cfg, base_model, fenders_model, wheel_model)
         robot.reparentTo(self.render)
-        body_np = robot.find("**/robot_body")
-        if body_np:
-            body_np.setColor(_BODY_CLR)
 
         # axis lines
         for label, end, clr in [
@@ -226,7 +198,7 @@ class PreviewApp(ShowBase):
 
     def _on_zoom(self, d):
         self._dist *= 1.15 if d > 0 else 1 / 1.15
-        self._dist = max(0.3, min(20.0, self._dist))
+        self._dist = max(0.1, min(20.0, self._dist))
         self._update_camera()
 
     def _orbit_task(self, task):

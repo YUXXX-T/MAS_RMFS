@@ -104,6 +104,7 @@ def main():
             use_gpu=config.simulation.p3d_use_gpu,
             night_mode=config.simulation.night_mode,
             robot_label_scale=config.simulation.robot_label_scale,
+            robot_model_cfg=config.robot_model,
         )
     elif args.visualize:
         visualizer = TerminalVisualizer()
