@@ -98,6 +98,9 @@ class SimulationParams:
     fixed_order_size: bool = False    # True = 每个订单固定 max_items_per_order 个 pod
     task_execution_mode: str = "parallel"  # "parallel" 或 "serial"
     max_items_per_sku: int = 5        # 订单中每种 SKU 需求的物品数量上限
+    robot_label_scale: float = 0.25   # Panda3D 机器人编号标签大小（3D 默认值；2D 自动取 88%）
+    show_selection_panel: bool = True  # 是否显示选中信息面板
+    show_robot_paths_panel: bool = True  # 是否显示机器人路径面板
 
 
 @dataclass
@@ -177,6 +180,9 @@ def load_config(path: str) -> SimulationConfig:
         fixed_order_size=sim_raw.get("fixed_order_size", False),
         task_execution_mode=sim_raw.get("task_execution_mode", "parallel"),
         max_items_per_sku=sim_raw.get("max_items_per_sku", 5),
+        robot_label_scale=sim_raw.get("robot_label_scale", 0.25),
+        show_selection_panel=sim_raw.get("show_selection_panel", True),
+        show_robot_paths_panel=sim_raw.get("show_robot_paths_panel", True),
     )
 
     # --- Parse policies ---

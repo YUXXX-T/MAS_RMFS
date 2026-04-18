@@ -19,7 +19,7 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QSlider, QLabel, QFrame, QGroupBox, QSizePolicy,
-    QSplitter,
+    QSplitter, QScrollArea,
 )
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont
@@ -412,9 +412,42 @@ class SimulationUI(QMainWindow):
         info_layout.addWidget(self._pending_label)
         layout.addWidget(info_box)
 
+        # ── 选中信息区域（点击机器人或 Pod 后显示详情） ──
+        self._sel_box = QGroupBox("Selection (Left-Click)")
+        sel_layout = QVBoxLayout(self._sel_box)
+        self._sel_label = QLabel("Pick Robot or Pod for details")
+        self._sel_label.setWordWrap(True)
+        self._sel_label.setStyleSheet("font-size: 11px;")
+        sel_layout.addWidget(self._sel_label)
+        self._sel_visible = self._engine.config.simulation.show_selection_panel
+        self._sel_box.setVisible(self._sel_visible)
+        layout.addWidget(self._sel_box)
+
+        # ── 机器人路径信息面板（可滚动） ──
+        self._path_box = QGroupBox("Robot Paths")
+        path_outer_layout = QVBoxLayout(self._path_box)
+        path_outer_layout.setContentsMargins(4, 4, 4, 4)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumHeight(500)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+
+        self._path_panel_widget = QWidget()
+        self._path_panel_layout = QVBoxLayout(self._path_panel_widget)
+        self._path_panel_layout.setContentsMargins(2, 2, 2, 2)
+        self._path_panel_layout.setSpacing(2)
+        scroll.setWidget(self._path_panel_widget)
+
+        path_outer_layout.addWidget(scroll)
+        self._path_visible = self._engine.config.simulation.show_robot_paths_panel
+        self._path_box.setVisible(self._path_visible)
+        layout.addWidget(self._path_box)
+        self._path_labels: list[QLabel] = []
+
         layout.addStretch()
 
-        hint = QLabel("Space: Play/Pause  |  Esc: Stop  |  C: Charts")
+        hint = QLabel("Space: Play/Pause | Esc: Stop | C: Charts | Click: Select")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("font-size: 10px; color: #888;")
         layout.addWidget(hint)
@@ -633,6 +666,7 @@ class SimulationUI(QMainWindow):
 
         # 驱动 Panda3D 渲染
         if self._viz._initialised:
+            self._viz._world_state_ref = self._engine.world
             self._viz._update_pods(self._engine.world)
             self._viz._update_agents(self._engine.world)
             self._viz._update_hud(self._engine.world)
@@ -663,6 +697,101 @@ class SimulationUI(QMainWindow):
                       if o.status.name == "IN_PROGRESS")
         self._pending_label.setText(f"Pending: {pending}")
         self._inprogress_label.setText(f"In Progress: {in_prog}")
+
+        if self._sel_visible:
+            self._update_selection_display()
+        if self._path_visible:
+            self._update_robot_paths(ws)
+
+    def _update_selection_display(self):
+        """刷新选中实体的信息面板。"""
+        sel_info = self._viz.get_selection_info()
+        if sel_info is None:
+            self._sel_label.setText("Pick Robot or Pod for detals")
+        elif sel_info["type"] == "agent":
+            lines = [f"Robot #{sel_info['agent_id']}  [{sel_info['status']}]"]
+            lines.append(f"Position: {sel_info['position']}")
+            if sel_info.get("carried_pod_id") is not None:
+                lines.append(f"Carrying Pod #{sel_info['carried_pod_id']}")
+            if "order_id" in sel_info:
+                lines.append(f"Order #{sel_info['order_id']} ({sel_info.get('order_status', '?')})")
+                skus = sel_info.get("sku_demands", {})
+                for sku, qty in skus.items():
+                    lines.append(f"  {sku}: {qty}")
+            if "task_type" in sel_info:
+                lines.append(f"Task: {sel_info['task_type']} -> {sel_info.get('destination', '?')}")
+            self._sel_label.setText("\n".join(lines))
+        elif sel_info["type"] == "pod":
+            lines = [f"Pod #{sel_info['pod_id']}  (Type: {sel_info['pod_type']})"]
+            lines.append(f"Position: {sel_info['position']}")
+            lines.append(f"Home: {sel_info['home_position']}")
+            if sel_info["is_carried"]:
+                lines.append(f"Carried by Robot #{sel_info['carried_by']}")
+            inv = sel_info.get("sku_inventory", {})
+            if inv:
+                lines.append("SKU Inventory:")
+                for sku, qty in inv.items():
+                    lines.append(f"  {sku}: {qty}")
+            else:
+                lines.append("Inventory: empty")
+            self._sel_label.setText("\n".join(lines))
+
+    def _update_robot_paths(self, ws):
+        """刷新机器人路径信息面板。"""
+        border_clr = "#333355" if self._night_mode else "#ccccdd"
+
+        if not self._path_labels and ws.agents:
+            for agent in ws.agents:
+                lbl = QLabel()
+                lbl.setWordWrap(True)
+                lbl.setStyleSheet(
+                    f"font-size: 10px; padding: 2px; "
+                    f"border-bottom: 1px solid {border_clr};"
+                )
+                self._path_panel_layout.addWidget(lbl)
+                self._path_labels.append(lbl)
+            self._path_panel_layout.addStretch()
+
+        for i, agent in enumerate(ws.agents):
+            if i >= len(self._path_labels):
+                break
+            lbl = self._path_labels[i]
+
+            parts = [f"R{agent.agent_id}"]
+
+            if agent.carried_pod_id is not None:
+                parts.append(f"Pod#{agent.carried_pod_id}")
+            else:
+                parts.append("no pod")
+
+            if agent.assigned_task_id is not None:
+                task = ws.task_state.tasks.get(agent.assigned_task_id)
+                if task:
+                    order_tasks = ws.task_state.get_tasks_for_order(task.order_id)
+                    agent_tasks = [t for t in order_tasks
+                                   if t.agent_id == agent.agent_id]
+                    agent_tasks.sort(key=lambda t: t.task_id)
+
+                    path_parts = []
+                    for t in agent_tasks:
+                        label = {"PICK": "Pod", "DELIVER": "Station",
+                                 "RETURN": "Home"}.get(t.task_type.name, "?")
+                        if t.status.name == "COMPLETED":
+                            mark = "done"
+                        elif t.status.name == "IN_PROGRESS":
+                            mark = ">>>"
+                        else:
+                            mark = "wait"
+                        path_parts.append(
+                            f"{t.source}->{t.destination}({label},{mark})"
+                        )
+                    parts.append(" | ".join(path_parts))
+                else:
+                    parts.append("task N/A")
+            else:
+                parts.append("idle")
+
+            lbl.setText("  ".join(parts))
 
     # ── 按钮处理器 ───────────────────────────────────────────────
 

@@ -122,7 +122,10 @@
         "log_file": null,
         "fixed_order_size": true,
         "task_execution_mode": "parallel",
-        "max_items_per_sku": 3
+        "max_items_per_sku": 3,
+        "robot_label_scale": 0.25,
+        "show_selection_panel": true,
+        "show_robot_paths_panel": true
     },
     "policies": {
         "order_generator": {

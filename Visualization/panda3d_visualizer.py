@@ -33,6 +33,7 @@ Panda3D 仓库可视化工具
 """
 
 import math
+import os
 from typing import TYPE_CHECKING
 
 from direct.showbase.ShowBase import ShowBase
@@ -50,6 +51,16 @@ from panda3d.core import (
     LineSegs,
     LPoint3f,
     RigidBodyCombiner,
+    Plane,
+    Point3,
+    Vec3,
+    Point2,
+    GeomVertexFormat,
+    GeomVertexData,
+    GeomVertexWriter,
+    Geom,
+    GeomNode,
+    GeomTriangles,
 )
 
 if TYPE_CHECKING:
@@ -150,6 +161,86 @@ def _make_box(name: str, sx: float, sy: float, sz: float) -> NodePath:
     return root
 
 
+_WHEEL_CLR = LVecBase4f(0.25, 0.25, 0.28, 1)
+
+
+def _make_cylinder(name: str, radius: float, height: float,
+                   segments: int = 12) -> NodePath:
+    """Build a cylinder centred at origin, axis along Z, with UV coords."""
+    fmt = GeomVertexFormat.getV3t2()
+    vdata = GeomVertexData(name, fmt, Geom.UHStatic)
+    n = segments
+    vdata.setNumRows(n * 2 + 2)
+    vertex = GeomVertexWriter(vdata, "vertex")
+    texcoord = GeomVertexWriter(vdata, "texcoord")
+
+    for i in range(n):
+        a = 2.0 * math.pi * i / n
+        x = radius * math.cos(a)
+        y = radius * math.sin(a)
+        u = i / n
+        vertex.addData3(x, y, height / 2)
+        texcoord.addData2(u, 1)
+        vertex.addData3(x, y, -height / 2)
+        texcoord.addData2(u, 0)
+
+    vertex.addData3(0, 0, height / 2)
+    texcoord.addData2(0.5, 0.5)
+    vertex.addData3(0, 0, -height / 2)
+    texcoord.addData2(0.5, 0.5)
+
+    tris = GeomTriangles(Geom.UHStatic)
+    tc = n * 2
+    bc = n * 2 + 1
+    for i in range(n):
+        ni = (i + 1) % n
+        t0, b0 = i * 2, i * 2 + 1
+        t1, b1 = ni * 2, ni * 2 + 1
+        tris.addVertices(t0, b0, b1)
+        tris.addVertices(t0, b1, t1)
+        tris.addVertices(tc, t0, t1)
+        tris.addVertices(bc, b1, b0)
+
+    geom = Geom(vdata)
+    geom.addPrimitive(tris)
+    node = GeomNode(name)
+    node.addGeom(geom)
+    return NodePath(node)
+
+
+def _make_robot(name: str, wheel_model=None) -> NodePath:
+    """Build a robot model: box body + 4 wheels."""
+    root = NodePath(name)
+
+    body_w = CELL * 0.50
+    body_d = CELL * 0.50
+    body_h = CELL * 0.30
+    wheel_r = CELL * 0.07
+
+    body = _make_box(name + "_body", body_w, body_d, body_h)
+    body.reparentTo(root)
+    body.setPos(0, 0, wheel_r + body_h / 2)
+
+    wx = body_w * 0.42
+    wy = body_d * 0.42
+    for i, (dx, dy) in enumerate([(-wx, -wy), (wx, -wy), (-wx, wy), (wx, wy)]):
+        if wheel_model is not None:
+            pivot = root.attachNewNode(f"{name}_wp{i}")
+            pivot.setScale(wheel_r / 217.0)
+            pivot.setR(90)
+            pivot.setPos(dx, dy, wheel_r)
+            w = wheel_model.copyTo(pivot)
+            w.setPos(0, 0, -80.5)
+        else:
+            w = _make_cylinder(f"{name}_w{i}", wheel_r, CELL * 0.05)
+            w.reparentTo(root)
+            w.setR(90)
+            w.setPos(dx, dy, wheel_r)
+            w.setColor(_WHEEL_CLR)
+
+    return root
+
+
 class Panda3DVisualizer(BaseVisualizer):
     """
     Warehouse visualizer with switchable 2D / 3D camera.
@@ -163,10 +254,11 @@ class Panda3DVisualizer(BaseVisualizer):
     """
 
     def __init__(self, view_mode: str = "2d", use_gpu: bool = False,
-                 night_mode: bool = True):
+                 night_mode: bool = True, robot_label_scale: float = 0.25):
         self._view_mode = view_mode.lower()
         self._use_gpu = use_gpu
         self._night_mode = night_mode
+        self._robot_label_scale = robot_label_scale
         self._pal = _DARK_PALETTE if night_mode else _LIGHT_PALETTE
         self._app: ShowBase | None = None
         self._initialised = False
@@ -180,10 +272,17 @@ class Panda3DVisualizer(BaseVisualizer):
         self._hud_np: NodePath | None = None
         self._parent_window_handle: int | None = None
 
+        # Selection state
+        self._selected_agent_id: int | None = None
+        self._selected_pod_id: int | None = None
+        self._world_state_ref: "WorldState | None" = None
+        self._click_start_pos: tuple[float, float] | None = None
+
     # ── 公共 API ────────────────────────────────────────────────────
 
     def render(self, world_state: "WorldState"):
         """每个 tick 由仿真引擎调用一次。"""
+        self._world_state_ref = world_state
         if not self._initialised:
             self._setup(world_state)
 
@@ -299,9 +398,10 @@ class Panda3DVisualizer(BaseVisualizer):
             self._app.cam.setPos(cx, -10, cz_2d)
             self._app.cam.lookAt(cx, 0, cz_2d)
 
-            # 2D 鼠标控制：滚轮 = 缩放，右键拖动 = 平移
+            # 2D 鼠标控制：滚轮 = 缩放，右键拖动 = 平移，左键点击 = 选取
             self._app.accept("wheel_up",   self._on_zoom_2d, [-1])
             self._app.accept("wheel_down",  self._on_zoom_2d, [1])
+            self._app.accept("mouse1",      self._on_pick_click)
             self._app.accept("mouse3",      self._on_mouse_down, [3])
             self._app.accept("mouse3-up",   self._on_mouse_up, [3])
             self._mouse_btn = 0
@@ -385,6 +485,29 @@ class Panda3DVisualizer(BaseVisualizer):
 
         # ---- Agent nodes (dynamic) ----
         agent_root = self._app.render.attachNewNode("agents")
+
+        wheel_model = None
+        if is_3d:
+            from panda3d.core import Filename
+            vis_dir = os.path.dirname(__file__)
+            egg_path = os.path.join(
+                vis_dir, "models", "car_wheel", "meshes", "car_wheel.egg",
+            )
+            tex_path = os.path.join(
+                vis_dir, "models", "car_wheel",
+                "materials", "textures", "car_wheel.png",
+            )
+            if os.path.isfile(egg_path):
+                wheel_model = self._app.loader.loadModel(
+                    Filename.fromOsSpecific(egg_path)
+                )
+                if os.path.isfile(tex_path):
+                    tex = self._app.loader.loadTexture(
+                        Filename.fromOsSpecific(tex_path)
+                    )
+                    wheel_model.setTexture(tex, 1)
+                    wheel_model.setMaterialOff()
+
         for agent in world_state.agents:
             clr = _ROBOT_COLOURS[agent.agent_id % len(_ROBOT_COLOURS)]
 
@@ -397,10 +520,12 @@ class Panda3DVisualizer(BaseVisualizer):
                 gnp.hide()
                 self._glow_nodes[agent.agent_id] = gnp
 
-                # Agent box
-                anp = _make_box("agent", CELL * 0.55, CELL * 0.55, CELL * 0.45)
+                # Agent model (body + wheels)
+                anp = _make_robot("agent", wheel_model=wheel_model)
                 anp.reparentTo(agent_root)
-                anp.setColor(clr)
+                body_np = anp.find("**/agent_body")
+                if body_np:
+                    body_np.setColor(clr)
                 self._agent_nodes[agent.agent_id] = anp
 
                 # Billboard label
@@ -409,7 +534,7 @@ class Panda3DVisualizer(BaseVisualizer):
                 tn.setTextColor(1, 1, 1, 1)
                 tn.setAlign(TextNode.ACenter)
                 lnp = agent_root.attachNewNode(tn)
-                lnp.setScale(0.25)
+                lnp.setScale(self._robot_label_scale)
                 lnp.setBillboardPointEye()
                 self._agent_labels[agent.agent_id] = lnp
             else:
@@ -435,7 +560,7 @@ class Panda3DVisualizer(BaseVisualizer):
                 tn.setTextColor(1, 1, 1, 1)
                 tn.setAlign(TextNode.ACenter)
                 lnp = agent_root.attachNewNode(tn)
-                lnp.setScale(0.22)
+                lnp.setScale(self._robot_label_scale * 0.88)
                 self._agent_labels[agent.agent_id] = lnp
 
         # ---- HUD text ----
@@ -562,7 +687,7 @@ class Panda3DVisualizer(BaseVisualizer):
 
             if self._is_3d:
                 y = -r * CELL
-                anp.setPos(x, y, CELL * 0.225)
+                anp.setPos(x, y, 0)
                 gnp.setPos(x, y, CELL * 0.275)
                 lnp.setPos(x, y, CELL * 0.55)
             else:
@@ -570,7 +695,7 @@ class Panda3DVisualizer(BaseVisualizer):
                 gnp.setPos(x, -0.4, z)
                 lnp.setPos(x, -0.6, z + CELL * 0.02)
 
-            if agent.carried_pod_id is not None:
+            if agent.carried_pod_id is not None or aid == self._selected_agent_id:
                 gnp.show()
             else:
                 gnp.hide()
@@ -645,9 +770,23 @@ class Panda3DVisualizer(BaseVisualizer):
     def _on_mouse_down(self, btn):
         self._mouse_btn = btn
         self._mouse_prev = None
+        if btn == 1 and self._app.mouseWatcherNode.hasMouse():
+            self._click_start_pos = (
+                self._app.mouseWatcherNode.getMouseX(),
+                self._app.mouseWatcherNode.getMouseY(),
+            )
 
     def _on_mouse_up(self, btn):
         if self._mouse_btn == btn:
+            if btn == 1 and self._is_3d and self._click_start_pos is not None:
+                if self._app.mouseWatcherNode.hasMouse():
+                    mx = self._app.mouseWatcherNode.getMouseX()
+                    my = self._app.mouseWatcherNode.getMouseY()
+                    dx = mx - self._click_start_pos[0]
+                    dy = my - self._click_start_pos[1]
+                    if (dx * dx + dy * dy) < 0.0004:
+                        self._on_pick_click()
+                self._click_start_pos = None
             self._mouse_btn = 0
             self._mouse_prev = None
 
@@ -847,3 +986,139 @@ class Panda3DVisualizer(BaseVisualizer):
             self._update_orbit_camera()
 
         return task.cont
+
+    # ── 实体选取（点击选中） ────────────────────────────────────────
+
+    def _on_pick_click(self):
+        """鼠标点击选取最近的机器人或 Pod。"""
+        if not self._app.mouseWatcherNode.hasMouse():
+            return
+
+        mx = self._app.mouseWatcherNode.getMouseX()
+        my = self._app.mouseWatcherNode.getMouseY()
+
+        world_pos = self._mouse_to_world(mx, my)
+        if world_pos is None:
+            return
+
+        selected = self._find_nearest_entity(world_pos)
+
+        if selected is None:
+            self._selected_agent_id = None
+            self._selected_pod_id = None
+        elif selected[0] == "agent":
+            self._selected_agent_id = selected[1]
+            self._selected_pod_id = None
+        elif selected[0] == "pod":
+            self._selected_pod_id = selected[1]
+            self._selected_agent_id = None
+
+    def _mouse_to_world(self, mx: float, my: float):
+        """将归一化鼠标坐标投影到世界坐标系的地面平面上。"""
+        lens = self._app.cam.node().getLens()
+        cam_np = self._app.camera
+
+        near_point = Point3()
+        far_point = Point3()
+        if not lens.extrude(Point2(mx, my), near_point, far_point):
+            return None
+
+        near_world = self._app.render.getRelativePoint(cam_np, near_point)
+        far_world = self._app.render.getRelativePoint(cam_np, far_point)
+
+        if self._is_3d:
+            plane = Plane(Vec3(0, 0, 1), Point3(0, 0, 0))
+        else:
+            plane = Plane(Vec3(0, 1, 0), Point3(0, 0, 0))
+
+        intersection = Point3()
+        if not plane.intersectsLine(intersection, near_world, far_world):
+            return None
+
+        return intersection
+
+    def _find_nearest_entity(self, world_pos):
+        """查找离世界坐标点最近的机器人或 Pod。"""
+        threshold = CELL * 0.5
+        best_dist = threshold
+        best = None
+
+        ws = self._world_state_ref
+        if ws is None:
+            return None
+
+        for agent in ws.agents:
+            r, c = agent.position
+            if self._is_3d:
+                dx = world_pos.x - c * CELL
+                dy = world_pos.y - (-r * CELL)
+            else:
+                dx = world_pos.x - c * CELL
+                dy = world_pos.z - (-r * CELL)
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist < best_dist:
+                best_dist = dist
+                best = ("agent", agent.agent_id)
+
+        for pod in ws.pod_state.pods.values():
+            if pod.is_carried:
+                continue
+            pr, pc = pod.current_position
+            if self._is_3d:
+                dx = world_pos.x - pc * CELL
+                dy = world_pos.y - (-pr * CELL)
+            else:
+                dx = world_pos.x - pc * CELL
+                dy = world_pos.z - (-pr * CELL)
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist < best_dist:
+                best_dist = dist
+                best = ("pod", pod.pod_id)
+
+        return best
+
+    def get_selection_info(self) -> dict | None:
+        """返回当前选中实体的信息，供 UI 显示。"""
+        ws = self._world_state_ref
+        if ws is None:
+            return None
+
+        if self._selected_agent_id is not None:
+            agent = ws.get_agent(self._selected_agent_id)
+            info = {
+                "type": "agent",
+                "agent_id": agent.agent_id,
+                "position": agent.position,
+                "status": agent.status.name,
+                "carried_pod_id": agent.carried_pod_id,
+            }
+            if agent.assigned_task_id is not None:
+                task = ws.task_state.tasks.get(agent.assigned_task_id)
+                if task:
+                    info["task_id"] = task.task_id
+                    info["task_type"] = task.task_type.name
+                    info["pod_id"] = task.pod_id
+                    info["source"] = task.source
+                    info["destination"] = task.destination
+                    order = ws.order_state.orders.get(task.order_id)
+                    if order:
+                        info["order_id"] = order.order_id
+                        info["sku_demands"] = order.sku_demands
+                        info["order_status"] = order.status.name
+            return info
+
+        if self._selected_pod_id is not None:
+            pod = ws.pod_state.get_pod(self._selected_pod_id)
+            if pod:
+                return {
+                    "type": "pod",
+                    "pod_id": pod.pod_id,
+                    "pod_type": pod.pod_type,
+                    "position": pod.current_position,
+                    "home_position": pod.home_position,
+                    "is_carried": pod.is_carried,
+                    "carried_by": pod.carried_by,
+                    "sku_inventory": dict(pod.sku_inventory),
+                }
+
+        return None
