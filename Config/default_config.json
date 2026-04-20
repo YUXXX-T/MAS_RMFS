@@ -121,7 +121,7 @@
         "log_level": "INFO",
         "log_file": null,
         "fixed_order_size": true,
-        "task_execution_mode": "parallel",
+        "task_execution_mode": "serial",
         "max_items_per_sku": 3,
         "robot_label_scale": 0.25,
         "show_selection_panel": true,

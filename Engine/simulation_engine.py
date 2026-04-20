@@ -342,7 +342,10 @@ class SimulationEngine:
                 # Check if agent has more tasks
                 next_task = self.world.task_state.get_next_task_for_agent(agent.agent_id)
                 if next_task is None:
-                    agent.status = AgentStatus.IDLE
+                    # Don't mark IDLE until the order is fully complete
+                    if self.world.task_state.all_order_tasks_completed(active_task.order_id):
+                        agent.status = AgentStatus.IDLE
+                    # else: agent stays in RETURNING status, freed by _check_order_completion
 
     def _check_order_completion(self, tick: int):
         """Check and update order completion status."""
@@ -355,6 +358,15 @@ class SimulationEngine:
                     f"(created at tick {order.created_at}, "
                     f"duration={tick - order.created_at} ticks)"
                 )
+                # Free up all agents that worked on this order
+                order_tasks = self.world.task_state.get_tasks_for_order(order.order_id)
+                agent_ids = {t.agent_id for t in order_tasks if t.agent_id is not None}
+                for aid in agent_ids:
+                    agent = self.world.get_agent(aid)
+                    if agent.assigned_task_id is None and not agent.is_idle:
+                        next_task = self.world.task_state.get_next_task_for_agent(aid)
+                        if next_task is None:
+                            agent.status = AgentStatus.IDLE
 
     def _print_summary(self):
         """Print simulation summary on shutdown."""

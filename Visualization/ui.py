@@ -399,6 +399,19 @@ class SimulationUI(QMainWindow):
         self._chart_btn.clicked.connect(self._toggle_charts)
         layout.addWidget(self._chart_btn)
 
+        # ── Pod 显示切换 ──
+        pod_btn_row = QHBoxLayout()
+        self._pod_label_btn = QPushButton("Show Pod IDs")
+        self._pod_label_btn.setObjectName("chartBtn")
+        self._pod_label_btn.clicked.connect(self._toggle_pod_labels)
+        pod_btn_row.addWidget(self._pod_label_btn)
+
+        self._pod_color_btn = QPushButton("Color by Type")
+        self._pod_color_btn.setObjectName("chartBtn")
+        self._pod_color_btn.clicked.connect(self._toggle_pod_colors)
+        pod_btn_row.addWidget(self._pod_color_btn)
+        layout.addLayout(pod_btn_row)
+
         # ── 信息区域 ──
         info_box = QGroupBox("Info")
         info_layout = QVBoxLayout(info_box)
@@ -669,6 +682,7 @@ class SimulationUI(QMainWindow):
             self._viz._world_state_ref = self._engine.world
             self._viz._update_pods(self._engine.world)
             self._viz._update_agents(self._engine.world)
+            self._viz._update_station_labels(self._engine.world)
             self._viz._update_hud(self._engine.world)
             self._viz._app.taskMgr.step()
         elif not self._paused or not self._panda_embedded:
@@ -850,6 +864,20 @@ class SimulationUI(QMainWindow):
             self._chart_btn.setText("\U0001f4ca  Show Charts")
         # 图表显示/隐藏后重新调整 Panda3D 大小
         QTimer.singleShot(50, self._resize_panda)
+
+    def _toggle_pod_labels(self):
+        self._viz.toggle_pod_labels()
+        if self._viz._show_pod_labels:
+            self._pod_label_btn.setText("Hide Pod IDs")
+        else:
+            self._pod_label_btn.setText("Show Pod IDs")
+
+    def _toggle_pod_colors(self):
+        self._viz.toggle_pod_type_colors()
+        if self._viz._color_by_type:
+            self._pod_color_btn.setText("Default Color")
+        else:
+            self._pod_color_btn.setText("Color by Type")
 
     # ── 键盘快捷键 ────────────────────────────────────────────
 

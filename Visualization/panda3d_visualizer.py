@@ -104,6 +104,12 @@ _ROBOT_COLOURS = [
     LVecBase4f(0.09, 0.75, 0.81, 1),   # cyan
 ]
 
+_POD_TYPE_COLOURS = {
+    "A": LVecBase4f(0.90, 0.30, 0.30, 1),   # red
+    "B": LVecBase4f(0.30, 0.70, 0.90, 1),   # blue
+    "C": LVecBase4f(0.30, 0.85, 0.40, 1),   # green
+}
+
 CELL = 1.0        # world-space size of one grid cell
 PAD  = 0.02       # gap between cell quads
 
@@ -249,12 +255,23 @@ class Panda3DVisualizer(BaseVisualizer):
 
         # Scene-graph references kept across frames
         self._pod_nodes: dict[int, NodePath] = {}
+        self._pod_labels: dict[int, NodePath] = {}
         self._agent_nodes: dict[int, NodePath] = {}
         self._agent_labels: dict[int, NodePath] = {}
         self._glow_nodes: dict[int, NodePath] = {}
+        self._station_labels: dict[int, TextNode] = {}
+        self._station_label_nps: dict[int, NodePath] = {}
         self._hud_text: TextNode | None = None
         self._hud_np: NodePath | None = None
         self._parent_window_handle: int | None = None
+
+        # Toggle states
+        self._show_pod_labels: bool = False
+        self._color_by_type: bool = False
+
+        # Robot orientation tracking
+        self._agent_prev_pos: dict[int, tuple] = {}
+        self._agent_headings: dict[int, float] = {}
 
         # Selection state
         self._selected_agent_id: int | None = None
@@ -272,6 +289,7 @@ class Panda3DVisualizer(BaseVisualizer):
 
         self._update_pods(world_state)
         self._update_agents(world_state)
+        self._update_station_labels(world_state)
         self._update_hud(world_state)
 
         # Pump one frame so the window stays responsive
@@ -405,7 +423,8 @@ class Panda3DVisualizer(BaseVisualizer):
         else:
             self._build_grid_2d(static_root, ms, rows, cols)
 
-        # ---- Station labels ----
+        # ---- Station labels (dynamic — updated each tick for Req 5) ----
+        station_label_root = self._app.render.attachNewNode("station_labels")
         for sid, (sr, sc) in ms.station_positions.items():
             tn = TextNode(f"station_{sid}")
             tn.setText(f"S{sid}")
@@ -414,7 +433,7 @@ class Panda3DVisualizer(BaseVisualizer):
             tn.setCardColor(0, 0, 0, 0.5)
             tn.setCardAsMargin(0.05, 0.05, 0.05, 0.05)
             tn.setCardDecal(True)
-            tnp = static_root.attachNewNode(tn)
+            tnp = station_label_root.attachNewNode(tn)
             if is_3d:
                 tnp.setPos(sc * CELL, -sr * CELL, 0.6)
                 tnp.setScale(0.25)
@@ -422,6 +441,8 @@ class Panda3DVisualizer(BaseVisualizer):
             else:
                 tnp.setPos(sc * CELL, -0.1, -sr * CELL + CELL * 0.35)
                 tnp.setScale(0.25)
+            self._station_labels[sid] = tn
+            self._station_label_nps[sid] = tnp
 
         # ---- 网格线 (3D floor lines) ----
         if is_3d:
@@ -466,6 +487,25 @@ class Panda3DVisualizer(BaseVisualizer):
                 np.setColor(self._pal["pod"])
                 np.setTransparency(TransparencyAttrib.MAlpha)
             self._pod_nodes[pod.pod_id] = np
+
+            # Pod label (initially hidden)
+            ptn = TextNode(f"pod_lbl_{pod.pod_id}")
+            ptn.setText(str(pod.pod_id))
+            ptn.setTextColor(1, 1, 1, 1)
+            ptn.setAlign(TextNode.ACenter)
+            ptn.setCardColor(0, 0, 0, 0.5)
+            ptn.setCardAsMargin(0.02, 0.02, 0.02, 0.02)
+            ptn.setCardDecal(True)
+            plnp = pod_root.attachNewNode(ptn)
+            if is_3d:
+                plnp.setPos(pc * CELL, -pr * CELL, CELL * 0.45)
+                plnp.setScale(0.18)
+                plnp.setBillboardPointEye()
+            else:
+                plnp.setPos(pc * CELL, -0.3, -pr * CELL + CELL * 0.02)
+                plnp.setScale(0.15)
+            plnp.hide()
+            self._pod_labels[pod.pod_id] = plnp
 
         # ---- Agent nodes (dynamic) ----
         agent_root = self._app.render.attachNewNode("agents")
@@ -661,19 +701,41 @@ class Panda3DVisualizer(BaseVisualizer):
     def _update_pods(self, world_state):
         for pod in world_state.pod_state.pods.values():
             np = self._pod_nodes.get(pod.pod_id)
+            lnp = self._pod_labels.get(pod.pod_id)
             if np is None:
                 continue
             if pod.is_carried:
                 np.hide()
+                if lnp:
+                    lnp.hide()
             else:
                 np.show()
                 pr, pc = pod.current_position
                 if self._is_3d:
                     np.setPos(pc * CELL, -pr * CELL, CELL * 0.175)
+                    if lnp:
+                        lnp.setPos(pc * CELL, -pr * CELL, CELL * 0.45)
                 else:
                     np.setPos(pc * CELL, -0.2, -pr * CELL)
+                    if lnp:
+                        lnp.setPos(pc * CELL, -0.3, -pr * CELL + CELL * 0.02)
+
+                if self._color_by_type:
+                    clr = _POD_TYPE_COLOURS.get(pod.pod_type, self._pal["pod"])
+                    np.setColor(clr)
+                else:
+                    np.setColor(self._pal["pod"])
+
+                if lnp:
+                    if self._show_pod_labels:
+                        lnp.show()
+                    else:
+                        lnp.hide()
 
     def _update_agents(self, world_state):
+        rm_cfg = self._robot_model_cfg
+        use_model = rm_cfg.use_model if rm_cfg else False
+
         for agent in world_state.agents:
             aid = agent.agent_id
             r, c = agent.position
@@ -689,6 +751,17 @@ class Panda3DVisualizer(BaseVisualizer):
                 anp.setPos(x, y, 0)
                 gnp.setPos(x, y, CELL * 0.275)
                 lnp.setPos(x, y, CELL * 0.55)
+
+                if use_model:
+                    prev = self._agent_prev_pos.get(aid)
+                    if prev is not None and prev != (r, c):
+                        dr = r - prev[0]
+                        dc = c - prev[1]
+                        heading = math.degrees(math.atan2(dc, dr))
+                        self._agent_headings[aid] = heading
+                    if aid in self._agent_headings:
+                        anp.setH(self._agent_headings[aid])
+                self._agent_prev_pos[aid] = (r, c)
             else:
                 anp.setPos(x, -0.5, z)
                 gnp.setPos(x, -0.4, z)
@@ -722,6 +795,30 @@ class Panda3DVisualizer(BaseVisualizer):
             self._help_np = self._app.aspect2d.attachNewNode(ht)
             self._help_np.setScale(0.04)
             self._help_np.setPos(1.3, 0, -0.92)
+
+    def _update_station_labels(self, world_state):
+        """Update station labels: show order ID when a robot is delivering."""
+        from WorldState.task_state import TaskType, TaskStatus
+        ms = world_state.map_state
+
+        station_order_map: dict[int, int] = {}
+        for agent in world_state.agents:
+            active_task = world_state.task_state.get_active_task_for_agent(
+                agent.agent_id
+            )
+            if (active_task is not None
+                    and active_task.task_type == TaskType.DELIVER
+                    and active_task.status == TaskStatus.IN_PROGRESS):
+                for sid, pos in ms.station_positions.items():
+                    if agent.position == pos:
+                        station_order_map[sid] = active_task.order_id
+                        break
+
+        for sid, tn in self._station_labels.items():
+            if sid in station_order_map:
+                tn.setText(f"O{station_order_map[sid]}")
+            else:
+                tn.setText(f"S{sid}")
 
     # ── 窗口大小改变时的宽高比修正 ─────────────────────────
 
@@ -1075,6 +1172,12 @@ class Panda3DVisualizer(BaseVisualizer):
                 best = ("pod", pod.pod_id)
 
         return best
+
+    def toggle_pod_labels(self):
+        self._show_pod_labels = not self._show_pod_labels
+
+    def toggle_pod_type_colors(self):
+        self._color_by_type = not self._color_by_type
 
     def get_selection_info(self) -> dict | None:
         """返回当前选中实体的信息，供 UI 显示。"""
