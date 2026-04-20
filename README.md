@@ -12,6 +12,7 @@
 - [🔄 系统运行流程](#-系统运行流程)
 - [🧩 如何集成自定义算法](#-如何集成自定义算法)
 - [📦 已有算法列表](#-已有算法列表)
+- [📼 订单录制与回放](#-订单录制与回放)
 - [🎮 Panda3D 可视化](#-panda3d-可视化)
 - [🧠 强化学习接口](#-强化学习接口)
 
@@ -31,15 +32,16 @@ MAS_RMFS/
 │   ├── world.py                  # WorldState：聚合所有子状态
 │   ├── map_state.py              # 地图：网格、障碍物、工作站、货架区
 │   ├── agent_state.py            # 智能体：位置、路径、等待计数器
-│   ├── pod_state.py              # 货架（Pod）：位置、归属、搬运状态
-│   ├── order_state.py            # 订单：包含的 Pod、目标工作站
+│   ├── pod_state.py              # 货架（Pod）：位置、归属、搬运状态、SKU 库存
+│   ├── order_state.py            # 订单：SKU 需求、目标工作站
 │   └── task_state.py             # 任务：PICK / DELIVER / RETURN
 ├── Policies/                     # 策略层（算法可插拔）
 │   ├── policy_registry.py        # 策略注册中心
 │   ├── OrderGenerator/           # 订单生成器
 │   │   ├── base_order_generator.py
 │   │   ├── RandomOrderGenerator/
-│   │   └── ZipfOrderGenerator/
+│   │   ├── ZipfOrderGenerator/
+│   │   └── RecordedOrderGenerator/  # 回放预录制订单
 │   ├── PathPlanner/              # 路径规划器
 │   │   ├── base_path_planner.py
 │   │   ├── AStarPathPlanner/
@@ -47,10 +49,16 @@ MAS_RMFS/
 │   ├── TaskAssigner/             # 任务分配器
 │   │   ├── base_task_assigner.py
 │   │   └── GreedyTaskAssigner/
+│   ├── PodRetriever/             # SKU → Pod 检索器
+│   │   ├── base_pod_retriever.py
+│   │   └── DefaultPodRetriever/
 │   ├── PodReturnPlanner/         # 货架归还规划器
 │   │   ├── base_pod_return_planner.py
 │   │   ├── HomeReturnPlanner/
 │   │   └── NearestSlotPlanner/
+│   ├── PodInitializer/           # 货架初始化策略
+│   │   ├── base_pod_initializer.py
+│   │   └── DefaultPodInitializer/
 │   ├── ObservationEncoder/       # 🧠 RL 观测编码器
 │   │   ├── base_observation_encoder.py
 │   │   ├── GridObservationEncoder/
@@ -61,6 +69,10 @@ MAS_RMFS/
 │   └── RewardFunction/           # 🧠 RL 奖励函数
 │       ├── base_reward_function.py
 │       └── DefaultRewardFunction/
+├── OrderGenerateRecord/          # 订单录制工具
+│   ├── recorder.py               # 录制脚本：生成订单并保存为 JSON
+│   └── record/                   # 录制数据存放目录
+│       └── orders.json           # 录制的订单数据
 ├── Visualization/                # 可视化
 │   ├── visualizer.py             # 终端 ASCII / Matplotlib 仪表盘
 │   ├── panda3d_visualizer.py     # Panda3D 2D/3D 可视化
@@ -104,6 +116,13 @@ python main.py --config path/to/my_config.json
 
 # 🧠 使用 PettingZoo RL 环境
 python -c "from Env.rmfs_env import RMFSEnv; env = RMFSEnv(); print(env.possible_agents)"
+
+# 📼 录制订单（用于可复现实验）
+python -m OrderGenerateRecord.recorder --order_amounts 100
+python -m OrderGenerateRecord.recorder --generator ZipfOrderGenerator --zipf_param 1.5 --order_amounts 200
+
+# 回放录制订单（在 default_config.json 中设置 use_recorded_orders=true）
+python main.py --p3d
 ```
 
 > `--mpl`、`--p3d`、`--visualize` 三者互斥，只能选择其一。
@@ -114,7 +133,7 @@ python -c "from Env.rmfs_env import RMFSEnv; env = RMFSEnv(); print(env.possible
 
 ## ⚙️ 配置文件说明
 
-配置文件为 JSON 格式，包含四个顶层节点：
+配置文件为 JSON 格式，包含六个顶层节点：
 
 ```jsonc
 {
@@ -134,18 +153,33 @@ python -c "from Env.rmfs_env import RMFSEnv; env = RMFSEnv(); print(env.possible
         "starts": [[0,0], [0,1], [0,2]],// 各机器人初始位置
         "speed": 1
     },
+    "pods": {
+        "pod_types": ["A", "B", "C"],   // 货架类型列表
+        "skus_per_pod": 3,              // 每个 Pod 存储的 SKU 种类数
+        "sku_pool_size_per_type": 10,   // 每种类型的 SKU 池大小
+        "items_per_sku": 50             // 每种 SKU 的初始库存量
+    },
     "simulation": {
         "order_interval": 5,            // 每隔 N tick 生成订单
-        "max_items_per_order": 2,       // 每个订单最多包含的 Pod 数
+        "max_items_per_order": 2,       // 每个订单最多包含的 SKU 种类数
+        "max_items_per_sku": 3,         // 订单中每种 SKU 需求的物品数量上限
+        "fixed_order_size": true,       // true=固定 max_items_per_order 种 SKU
         "pickup_duration": 2,           // 拾取货架暂停 tick 数
         "dropoff_duration": 2,          // 放下货架暂停 tick 数
         "station_process_duration": 5,  // 工作站处理暂停 tick 数
         "tick_delay": 0.5,              // 每 tick 间隔秒数（0=全速）
+        "task_execution_mode": "serial",// 任务执行模式："parallel"（多机器人）或 "serial"（单机器人）
         "p3d_view_mode": "3d",          // Panda3D 视角："2d" 或 "3d"
         "p3d_use_gpu": false,           // 🚀 启用 GPU 批量渲染/实例化
         "night_mode": true,             // 🌙 true=深色主题，false=白色主题
+        "robot_label_scale": 0.25,      // Panda3D 机器人标签大小
+        "show_selection_panel": true,    // 是否显示选中信息面板
+        "show_robot_paths_panel": true,  // 是否显示机器人路径面板
         "log_level": "INFO",            // 日志级别
-        "log_file": null                // 日志输出文件（null=仅控制台）
+        "log_file": null,               // 日志输出文件（null=仅控制台）
+        "use_recorded_orders": false,   // 📼 true=从文件读取预录制订单
+        "recorded_orders_path": "",     // 📼 预录制订单 JSON 文件路径
+        "immediate_dispatch": false     // 📼 true=忽略录制 tick，立即投放所有订单
     },
     "policies": {
         // 支持两种写法：
@@ -161,10 +195,41 @@ python -c "from Env.rmfs_env import RMFSEnv; env = RMFSEnv(); print(env.possible
             "name": "PrioritizedPathPlanner",
             "params": { "max_horizon": 100, "goal_reserve": 10 }
         },
-        "pod_return_planner": "HomeReturnPlanner"
+        "pod_return_planner": "HomeReturnPlanner",
+        "pod_initializer": "DefaultPodInitializer",
+        "pod_retriever": "DefaultPodRetriever"
+    },
+    "robot_model": {
+        "use_model": true,              // 是否使用 3D 机器人模型
+        "body_offset_z": 0.008,         // 模型 Z 轴偏移
+        "body_hpr": [90, 90, 90],       // 模型初始姿态 [H, P, R]
+        "wheel_radius": 0.08,           // 轮子半径
+        "wheel_positions": [            // 四轮位置 [x, y, z]
+            [0.18, 0.14, 0.08],
+            [0.18, -0.14, 0.08],
+            [-0.18, 0.14, 0.08],
+            [-0.18, -0.14, 0.08]
+        ]
     }
 }
 ```
+
+### 📼 订单录制与回放
+
+系统支持预录制订单用于可复现的消融实验：
+
+| 参数 | 说明 |
+|------|------|
+| `use_recorded_orders` | 设为 `true` 时使用预录制订单替代实时生成 |
+| `recorded_orders_path` | 录制文件路径（如 `./OrderGenerateRecord/record/orders.json`） |
+| `immediate_dispatch` | 设为 `true` 时忽略录制的 tick 时间，在首个 tick 一次性投放全部订单。此模式自动强制 `task_execution_mode="serial"` |
+
+### 🔄 任务执行模式
+
+| 模式 | 说明 |
+|------|------|
+| `"serial"` | 每个订单的所有 Pod 由同一个机器人按顺序处理（PICK→DELIVER→RETURN→PICK→...） |
+| `"parallel"` | 每个订单的不同 Pod 分配给不同的空闲机器人并行处理 |
 
 ---
 
@@ -253,8 +318,17 @@ python -c "from Env.rmfs_env import RMFSEnv; env = RMFSEnv(); print(env.possible
 
 每个订单会被拆解为一组任务链，按顺序执行：
 
+**串行模式**（`task_execution_mode: "serial"`）— 同一机器人依次处理所有 Pod：
 ```
-Order(pods=[A, B], station=S)
+Order(skus=[X, Y], station=S)  →  PodRetriever 查找 Pod
+  │
+  └─→ Agent #1: PICK(pod=A) → DELIVER(pod=A, station=S) → RETURN(pod=A)
+                 → PICK(pod=B) → DELIVER(pod=B, station=S) → RETURN(pod=B)
+```
+
+**并行模式**（`task_execution_mode: "parallel"`）— 多个机器人同时处理不同 Pod：
+```
+Order(skus=[X, Y], station=S)  →  PodRetriever 查找 Pod
   │
   ├─→ Agent #1: PICK(pod=A) → DELIVER(pod=A, station=S) → RETURN(pod=A)
   └─→ Agent #2: PICK(pod=B) → DELIVER(pod=B, station=S) → RETURN(pod=B)
@@ -358,6 +432,8 @@ register("path_planner", "MyNewPlanner", MyNewPlanner)  # ← 新增
 | 📋 任务分配器 | `BaseTaskAssigner` | `assign()` | `assign(world_state) → list[Task]` |
 | 🗺️ 路径规划器 | `BasePathPlanner` | `plan()` | `plan(agent, goal, world_state) → list[tuple]` |
 | 📦 货架归还规划器 | `BasePodReturnPlanner` | `plan_return()` | `plan_return(pod, station_pos, world_state) → tuple` |
+| 🔍 SKU→Pod 检索器 | `BasePodRetriever` | `retrieve()` | `retrieve(sku, world_state) → Pod` |
+| 🏭 货架初始化器 | `BasePodInitializer` | `initialize()` | `initialize(pods, config) → None` |
 
 ### 🏭 策略注册中心工作原理
 
@@ -381,6 +457,7 @@ list_policies(category=None)     # 列出已注册的算法
 |--------|------|---------|
 | `RandomOrderGenerator` | 均匀随机选择货架生成订单 | — |
 | `ZipfOrderGenerator` | 按 Zipf 分布选择货架（模拟热门商品） | `zipf_param`（偏斜度，默认 1.5） |
+| `RecordedOrderGenerator` | 📼 回放预录制的 JSON 订单文件 | `recorded_orders_path`, `immediate_dispatch` |
 
 ### 🗺️ 路径规划器（PathPlanner）
 
@@ -401,6 +478,18 @@ list_policies(category=None)     # 列出已注册的算法
 |--------|------|---------|
 | `HomeReturnPlanner` | 始终返回货架的原始位置（默认） | — |
 | `NearestSlotPlanner` | 返回距工作站最近的空闲货架位 | — |
+
+### 🔍 SKU → Pod 检索器（PodRetriever）
+
+| 算法名 | 说明 | 可配参数 |
+|--------|------|---------|
+| `DefaultPodRetriever` | 选择距离最近且库存充足的 Pod | — |
+
+### 🏭 货架初始化器（PodInitializer）
+
+| 算法名 | 说明 | 可配参数 |
+|--------|------|---------|
+| `DefaultPodInitializer` | 按 pod_types 和 SKU 池随机分配库存 | — |
 
 ---
 
@@ -511,6 +600,61 @@ class MyEncoder(BaseObservationEncoder):
 
 ---
 
+## 📼 订单录制与回放
+
+为了支持可复现的消融实验，系统提供订单预录制与回放功能。
+
+### 📝 录制订单
+
+使用 `OrderGenerateRecord/recorder.py` 脚本预先生成订单并保存为 JSON：
+
+```bash
+# 使用默认 RandomOrderGenerator 生成 100 个订单
+python -m OrderGenerateRecord.recorder --order_amounts 100
+
+# 使用 ZipfOrderGenerator 生成 200 个订单
+python -m OrderGenerateRecord.recorder --generator ZipfOrderGenerator --zipf_param 1.5 --order_amounts 200
+
+# 指定输出路径和自定义配置
+python -m OrderGenerateRecord.recorder --config Config/default_config.json --output my_orders.json --order_amounts 50
+```
+
+录制文件格式示例：
+```json
+{
+    "generator": "ZipfOrderGenerator",
+    "total_orders": 100,
+    "orders": [
+        {
+            "tick": 2,
+            "sku_demands": {"A_SKU3": 2, "B_SKU1": 1},
+            "station_id": 1
+        }
+    ]
+}
+```
+
+### 🔄 回放订单
+
+在配置文件中启用录制回放：
+
+```json
+"simulation": {
+    "use_recorded_orders": true,
+    "recorded_orders_path": "./OrderGenerateRecord/record/orders.json",
+    "immediate_dispatch": false
+}
+```
+
+**两种回放模式：**
+
+| 模式 | `immediate_dispatch` | 行为 |
+|------|---------------------|------|
+| **按 tick 回放** | `false` | 按录制时的 tick 逐步投放订单（默认） |
+| **立即投放** | `true` | 忽略录制 tick，在首个 tick 一次性投放全部订单，自动强制 `serial` 模式 |
+
+---
+
 ## 🎮 Panda3D 可视化
 
 使用 `--p3d` 标志启动 Panda3D 可视化窗口，支持 **2D 正交投影** 和 **3D 透视投影** 两种模式。
@@ -545,11 +689,27 @@ class MyEncoder(BaseObservationEncoder):
 | 障碍物 | 立体方块，有高度感 |
 | 地板 | 平铺色块 + 网格线 |
 | 货架 | 3D 方块，浮在地板之上 |
-| 机器人 | 3D 方块 + 发光环（搬运时） |
+| 机器人 | 3D 模型（可配置） + 发光环（搬运时），**朝向自动跟随行走方向** |
 | 标签 | 🏷️ Billboard 效果，始终面向相机 |
 | HUD | 📊 左上角显示 Tick / 订单数 / 完成率 |
 | 坐标轴 | 🧭 左下角 3D 坐标系指示器（同步旋转） |
 | 键盘快捷键 | ⌨️ `1`=俯视 `2`=正视 `3`=侧视 `4`=等距 `R`=重置 |
+
+### 🔘 UI 控制面板功能
+
+| 按钮 | 说明 |
+|------|------|
+| **Show Pod IDs** | 切换显示/隐藏货架编号标签 |
+| **Color by Type** | 切换按货架类型（A=红色、B=蓝色、C=绿色）着色 |
+| **Chart** | 打开/关闭统计图表面板 |
+
+### 🏷️ 动态工作站标签
+
+当机器人在工作站进行配送时，工作站标签会自动从 `S{id}` 切换为 `O{order_id}`，显示当前正在处理的订单编号。配送完成后自动恢复为工作站编号。
+
+### 🤖 机器人模型朝向
+
+当 `robot_model.use_model=true` 时，3D 机器人模型会自动旋转朝向行走方向。模型参数可在配置文件的 `robot_model` 节点中调整。
 
 
 
@@ -566,17 +726,6 @@ class MyEncoder(BaseObservationEncoder):
 └──────────────────┘                        └─────────────────────┘
 
 渲染端未来可以换成 任何引擎（Panda3D、Godot、甚至 C++ 自定义），只要它能读 ZeroMQ 消息。
-```
-🛒 **Inventory model and Inventory lookup policy**
-```
-📦 current:
-Pod = 1 atomic unit — each Pod only has a pod_id, a home_position, and a current_position. There's no concept of SKU, product type, or inventory inside a pod.
-Order = a list of pod IDs — an Order directly says "bring Pod #3 and Pod #7 to Station 1". There's no "I need product X" → "which pod has product X?" lookup.
-
-🆕 multi-product:
-🆕 Add an inventory model — each pod stores a dict[str, int] mapping SKU → quantity
-🆕 Change orders to reference SKU names instead of pod IDs
-🆕 Add an inventory lookup policy that decides which pod to fetch for a given SKU (e.g., nearest pod containing that SKU)
 ```
 
 

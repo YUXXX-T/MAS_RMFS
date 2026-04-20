@@ -125,7 +125,10 @@
         "max_items_per_sku": 3,
         "robot_label_scale": 0.25,
         "show_selection_panel": true,
-        "show_robot_paths_panel": true
+        "show_robot_paths_panel": true,
+        "use_recorded_orders": true,
+        "recorded_orders_path": "./OrderGenerateRecord/record/orders.json",
+        "immediate_dispatch": true
     },
     "policies": {
         "order_generator": {

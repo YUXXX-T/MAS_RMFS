@@ -64,6 +64,18 @@ def main():
     rp_name, rp_params = config.policies.pod_return_planner
     pr_name, pr_params = config.policies.pod_retriever
 
+    # 当 use_recorded_orders=true 时，使用 RecordedOrderGenerator 回放预录制订单
+    if config.simulation.use_recorded_orders:
+        og_name = "RecordedOrderGenerator"
+        og_params = {
+            "recorded_orders_path": config.simulation.recorded_orders_path,
+            "immediate_dispatch": config.simulation.immediate_dispatch,
+        }
+        # immediate_dispatch 强制使用 serial 模式
+        if config.simulation.immediate_dispatch:
+            config.simulation.task_execution_mode = "serial"
+            logger.info("immediate_dispatch=true → forced task_execution_mode='serial'")
+
     OrderGeneratorCls = get_policy("order_generator", og_name)
     TaskAssignerCls = get_policy("task_assigner", ta_name)
     PathPlannerCls = get_policy("path_planner", pp_name)

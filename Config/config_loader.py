@@ -118,6 +118,9 @@ class SimulationParams:
     robot_label_scale: float = 0.25   # Panda3D 机器人编号标签大小（3D 默认值；2D 自动取 88%）
     show_selection_panel: bool = True  # 是否显示选中信息面板
     show_robot_paths_panel: bool = True  # 是否显示机器人路径面板
+    use_recorded_orders: bool = False  # True = 从文件读取预录制订单
+    recorded_orders_path: str = ""    # 预录制订单 JSON 文件路径
+    immediate_dispatch: bool = False  # True = 忽略录制 tick，立即投放所有订单（强制 serial 模式）
 
 
 @dataclass
@@ -201,6 +204,9 @@ def load_config(path: str) -> SimulationConfig:
         robot_label_scale=sim_raw.get("robot_label_scale", 0.25),
         show_selection_panel=sim_raw.get("show_selection_panel", True),
         show_robot_paths_panel=sim_raw.get("show_robot_paths_panel", True),
+        use_recorded_orders=sim_raw.get("use_recorded_orders", False),
+        recorded_orders_path=sim_raw.get("recorded_orders_path", ""),
+        immediate_dispatch=sim_raw.get("immediate_dispatch", False),
     )
 
     # --- Parse policies ---

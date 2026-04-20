@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(F:/Anaconda3/Scripts/conda.exe run *)",
-      "Bash(conda run *)",
-      "Bash(/f/Anaconda3/Scripts/conda run *)"
-    ]
-  }
-}
