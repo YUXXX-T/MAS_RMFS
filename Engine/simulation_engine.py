@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from Config.config_loader import SimulationConfig
 from WorldState.world import WorldState
 from WorldState.agent_state import AgentStatus
-from WorldState.task_state import TaskType, TaskStatus
+from WorldState.task_state import Task, TaskType, TaskStatus
 from WorldState.order_state import OrderStatus
 from Policies.OrderGenerator import BaseOrderGenerator
 from Policies.TaskAssigner import BaseTaskAssigner
@@ -342,6 +342,15 @@ class SimulationEngine:
                 if agent.has_path:
                     continue  # Still moving
 
+                # --- Pod availability check for PICK tasks ---
+                if active_task.task_type == TaskType.PICK:
+                    pod = self.world.pod_state.get_pod(active_task.pod_id)
+                    if (pod is None
+                            or pod.is_carried
+                            or pod.current_position != agent.position):
+                        self._handle_pod_unavailable(agent, active_task, tick)
+                        continue
+
                 # --- Determine required wait duration ---
                 if active_task.task_type == TaskType.PICK:
                     required_wait = sim.pickup_duration
@@ -417,7 +426,10 @@ class SimulationEngine:
     def _check_order_completion(self, tick: int):
         """Check and update order completion status."""
         for order in self.world.order_state.get_in_progress_orders():
-            if self.world.task_state.all_order_tasks_completed(order.order_id):
+            if not self.world.task_state.all_order_tasks_completed(order.order_id):
+                continue
+
+            if order.is_fully_delivered:
                 order.status = OrderStatus.COMPLETED
                 order.completed_at = tick
                 self.logger.info(
@@ -425,6 +437,146 @@ class SimulationEngine:
                     f"(created at tick {order.created_at}, "
                     f"duration={tick - order.created_at} ticks)"
                 )
+            else:
+                order.status = OrderStatus.PENDING
+                order.pod_ids.clear()
+                self.logger.info(
+                    f"[Tick {tick}] Order #{order.order_id} reset to PENDING "
+                    f"(some pods were cancelled, retrying)"
+                )
+
+    def _handle_pod_unavailable(self, agent, pick_task, tick: int):
+        """Handle the case where a robot arrives but the pod is gone or taken."""
+        task_state = self.world.task_state
+
+        pick_task.status = TaskStatus.CANCELLED
+        related = task_state.get_related_chain_tasks(pick_task)
+        for t in related:
+            t.status = TaskStatus.CANCELLED
+
+        self.logger.warning(
+            f"[Tick {tick}] Agent #{agent.agent_id}: Pod #{pick_task.pod_id} "
+            f"unavailable at {agent.position}. "
+            f"Cancelled {1 + len(related)} tasks."
+        )
+
+        order = self.world.order_state.orders.get(pick_task.order_id)
+        if order is None:
+            self._reset_agent_to_idle(agent)
+            return
+
+        reserved_pods = {
+            t.pod_id
+            for t in task_state.tasks.values()
+            if t.status in (TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS)
+        }
+
+        alt_pod = self._find_alternative_pod(
+            order, pick_task.pod_id, reserved_pods
+        )
+        if alt_pod is None:
+            if pick_task.pod_id in order.pod_ids:
+                order.pod_ids.remove(pick_task.pod_id)
+            self.logger.info(
+                f"[Tick {tick}] Agent #{agent.agent_id}: No alternative pod "
+                f"for Order #{order.order_id}. Setting agent to IDLE."
+            )
+            self._reset_agent_to_idle(agent)
+            return
+
+        station_pos = self.world.map_state.station_positions.get(
+            order.station_id
+        )
+        if station_pos is None:
+            self._reset_agent_to_idle(agent)
+            return
+
+        pod_return_planner = self.task_assigner.pod_return_planner
+        if pod_return_planner is not None:
+            return_dest = pod_return_planner.plan_return(
+                alt_pod, station_pos, self.world
+            )
+        else:
+            return_dest = alt_pod.home_position
+
+        new_pick = Task(
+            task_type=TaskType.PICK,
+            order_id=order.order_id,
+            pod_id=alt_pod.pod_id,
+            source=agent.position,
+            destination=alt_pod.current_position,
+        )
+        new_pick.agent_id = agent.agent_id
+        new_pick.status = TaskStatus.ASSIGNED
+
+        new_deliver = Task(
+            task_type=TaskType.DELIVER,
+            order_id=order.order_id,
+            pod_id=alt_pod.pod_id,
+            source=alt_pod.current_position,
+            destination=station_pos,
+        )
+        new_deliver.agent_id = agent.agent_id
+        new_deliver.status = TaskStatus.ASSIGNED
+
+        new_return = Task(
+            task_type=TaskType.RETURN,
+            order_id=order.order_id,
+            pod_id=alt_pod.pod_id,
+            source=station_pos,
+            destination=return_dest,
+        )
+        new_return.agent_id = agent.agent_id
+        new_return.status = TaskStatus.ASSIGNED
+
+        task_state.add_task(new_pick)
+        task_state.add_task(new_deliver)
+        task_state.add_task(new_return)
+
+        if pick_task.pod_id in order.pod_ids:
+            idx = order.pod_ids.index(pick_task.pod_id)
+            order.pod_ids[idx] = alt_pod.pod_id
+
+        agent.clear_path()
+        agent.assigned_task_id = None
+        agent.status = AgentStatus.IDLE
+        agent.wait_ticks = 0
+
+        self.logger.info(
+            f"[Tick {tick}] Agent #{agent.agent_id}: Assigned alternative "
+            f"Pod #{alt_pod.pod_id} for Order #{order.order_id}"
+        )
+
+    def _find_alternative_pod(self, order, original_pod_id, reserved_pods):
+        """Find an alternative pod that satisfies at least some SKU demands."""
+        needed_skus = {
+            sku for sku, qty in order.sku_demands.items() if qty > 0
+        }
+        available_pods = self.world.pod_state.get_available_pods()
+
+        best_pod = None
+        best_score = 0
+        for pod in available_pods:
+            if pod.pod_id in reserved_pods or pod.is_carried:
+                continue
+            if pod.pod_id == original_pod_id:
+                continue
+            score = sum(
+                1 for sku in needed_skus
+                if sku in pod.sku_inventory and pod.sku_inventory[sku] > 0
+            )
+            if score > best_score:
+                best_score = score
+                best_pod = pod
+        return best_pod
+
+    def _reset_agent_to_idle(self, agent):
+        """Reset an agent to IDLE state."""
+        agent.clear_path()
+        agent.assigned_task_id = None
+        agent.status = AgentStatus.IDLE
+        agent.wait_ticks = 0
+        agent.carried_pod_id = None
 
     def _print_summary(self):
         """Print simulation summary on shutdown."""

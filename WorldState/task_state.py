@@ -21,6 +21,7 @@ class TaskStatus(Enum):
     ASSIGNED = auto()     # Assigned to an agent, waiting to start
     IN_PROGRESS = auto()  # Agent is actively executing this task
     COMPLETED = auto()    # Task finished successfully
+    CANCELLED = auto()    # Task cancelled (e.g., pod was unavailable)
 
 
 class Task:
@@ -119,11 +120,23 @@ class TaskState:
         return [t for t in self.tasks.values() if t.order_id == order_id]
 
     def all_order_tasks_completed(self, order_id: int) -> bool:
-        """Check if all tasks for a given order are completed."""
+        """Check if all tasks for a given order are completed or cancelled."""
         order_tasks = self.get_tasks_for_order(order_id)
+        terminal = {TaskStatus.COMPLETED, TaskStatus.CANCELLED}
         return len(order_tasks) > 0 and all(
-            t.status == TaskStatus.COMPLETED for t in order_tasks
+            t.status in terminal for t in order_tasks
         )
+
+    def get_related_chain_tasks(self, pick_task: "Task") -> List["Task"]:
+        """Return DELIVER and RETURN tasks in the same chain as a PICK task."""
+        return [
+            t for t in self.tasks.values()
+            if t.task_id != pick_task.task_id
+            and t.order_id == pick_task.order_id
+            and t.pod_id == pick_task.pod_id
+            and t.agent_id == pick_task.agent_id
+            and t.status in (TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS)
+        ]
 
     def __repr__(self) -> str:
         pending = len(self.get_pending_tasks())

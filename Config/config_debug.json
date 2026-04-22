@@ -1,37 +1,87 @@
 {
     "map": {
-        "rows": 50,
-        "cols": 50,
+        "rows": 40,
+        "cols": 40,
         "obstacles": [],
         "stations": [
             {
                 "id": 1,
                 "row": 0,
-                "col": 10
+                "col": 7
             },
             {
                 "id": 2,
-                "row": 49,
-                "col": 10
+                "row": 0,
+                "col": 15
             },
             {
                 "id": 3,
                 "row": 0,
-                "col": 39
+                "col": 23
             },
             {
                 "id": 4,
-                "row": 49,
+                "row": 0,
+                "col": 31
+            },
+            {
+                "id": 5,
+                "row": 39,
+                "col": 7
+            },
+            {
+                "id": 6,
+                "row": 39,
+                "col": 15
+            },
+            {
+                "id": 7,
+                "row": 39,
+                "col": 23
+            },
+            {
+                "id": 8,
+                "row": 39,
+                "col": 31
+            },
+            {
+                "id": 9,
+                "row": 9,
+                "col": 0
+            },
+            {
+                "id": 10,
+                "row": 19,
+                "col": 0
+            },
+            {
+                "id": 11,
+                "row": 29,
+                "col": 0
+            },
+            {
+                "id": 12,
+                "row": 9,
+                "col": 39
+            },
+            {
+                "id": 13,
+                "row": 19,
+                "col": 39
+            },
+            {
+                "id": 14,
+                "row": 29,
                 "col": 39
             }
         ],
         "pod_layout": {
-            "num_rows": 10,
+            "num_rows": 7,
             "num_cols": 2,
-            "row_step": 14,
-            "col_step": 6,
-            "margin": 4,
-            "max_pods": 200
+            "row_step": 9,
+            "col_step": 4,
+            "margin": 3,
+            "max_pods": 0
         }
     },
     "robots": {
@@ -50,21 +100,20 @@
         "items_per_sku": 50
     },
     "simulation": {
-        "order_interval": 3,
+        "order_interval": 2,
         "max_items_per_order": 2,
         "pickup_duration": 2,
         "dropoff_duration": 2,
         "station_process_duration": 5,
-        "tick_delay": 0.3,
+        "tick_delay": 0.5,
         "p3d_view_mode": "2d",
         "p3d_use_gpu": false,
-        "night_mode": true,
+        "night_mode": false,
         "log_level": "INFO",
         "log_file": null,
-        "fixed_order_size": false,
-        "task_execution_mode": "parallel",
-        "max_items_per_sku": 3,
-        "initial_orders": 50
+        "fixed_order_size": true,
+        "task_execution_mode": "serial",
+        "max_items_per_sku": 3
     },
     "policies": {
         "order_generator": {
@@ -77,9 +126,8 @@
         "path_planner": {
             "name": "PrioritizedPathPlanner",
             "params": {
-                "max_horizon": 1000,
-                "goal_reserve": 6,
-                "max_expansions": 10000
+                "max_horizon": 100,
+                "goal_reserve": 6
             }
         },
         "pod_return_planner": "HomeReturnPlanner",
