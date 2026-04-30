@@ -342,10 +342,7 @@ class SimulationEngine:
                 # Check if agent has more tasks
                 next_task = self.world.task_state.get_next_task_for_agent(agent.agent_id)
                 if next_task is None:
-                    # Don't mark IDLE until the order is fully complete
-                    if self.world.task_state.all_order_tasks_completed(active_task.order_id):
-                        agent.status = AgentStatus.IDLE
-                    # else: agent stays in RETURNING status, freed by _check_order_completion
+                    agent.status = AgentStatus.IDLE
 
     def _check_order_completion(self, tick: int):
         """Check and update order completion status."""
