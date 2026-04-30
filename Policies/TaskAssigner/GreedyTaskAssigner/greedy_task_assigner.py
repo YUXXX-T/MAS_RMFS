@@ -194,6 +194,7 @@ class GreedyTaskAssigner(BaseTaskAssigner):
                 order_pods.append(pod)
 
             if not all_available or not order_pods:
+                order.pod_ids = []
                 continue
 
             # 找一个空闲机器人（按到第一个 pod 的距离排序）

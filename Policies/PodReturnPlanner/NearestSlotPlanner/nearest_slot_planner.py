@@ -72,4 +72,5 @@ class NearestSlotPlanner(BasePodReturnPlanner):
                 best_dist = d
                 best_pos = home_pos
 
+        pod.home_position = best_pos
         return best_pos

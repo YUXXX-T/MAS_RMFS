@@ -10,6 +10,7 @@ by selecting pods that cover the most unfulfilled demands.
 from typing import List, Dict
 
 from Policies.PodRetriever.base_pod_retriever import BasePodRetriever
+from WorldState.task_state import TaskStatus
 
 
 class DefaultPodRetriever(BasePodRetriever):
@@ -34,8 +35,16 @@ class DefaultPodRetriever(BasePodRetriever):
         remaining: Dict[str, int] = dict(order.sku_demands)
         selected_pod_ids: List[int] = []
 
-        # 获取所有可用 Pod（在原位且未被搬运）
-        available_pods = world_state.pod_state.get_available_pods()
+        # 获取所有可用 Pod（在原位且未被搬运），排除已被任务预定的 Pod
+        reserved_pod_ids = {
+            t.pod_id
+            for t in world_state.task_state.tasks.values()
+            if t.status in (TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS)
+        }
+        available_pods = [
+            p for p in world_state.pod_state.get_available_pods()
+            if p.pod_id not in reserved_pod_ids
+        ]
 
         while any(v > 0 for v in remaining.values()) and available_pods:
             best_pod = None
