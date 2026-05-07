@@ -876,6 +876,11 @@ class ReplaySlot:
         self.glow_nodes = glow_nodes
         self.title_np = title_np
         self.original_dr_dims: tuple[float, float, float, float] | None = None
+        self.film_w: float = 0.0
+        self.film_h: float = 0.0
+        self.original_film_w: float = 0.0
+        self.original_film_h: float = 0.0
+        self.original_cam_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 class MultiPanda3DReplayVisualizer:
@@ -1014,10 +1019,23 @@ class MultiPanda3DReplayVisualizer:
                     title_np=title_np,
                 )
                 slot.original_dr_dims = (left, right, bottom, top)
+                slot.film_w = half_w * 2
+                slot.film_h = half_h * 2
+                slot.original_film_w = half_w * 2
+                slot.original_film_h = half_h * 2
+                slot.original_cam_pos = (cx, -10, cz)
                 self._slots.append(slot)
 
-        # ── 注册鼠标点击事件 ──
+        # ── 注册鼠标事件 ──
         self._app.accept('mouse1', self._on_mouse_click)
+        self._app.accept('wheel_up', self._on_zoom, [-1])
+        self._app.accept('wheel_down', self._on_zoom, [1])
+        self._app.accept('mouse2', self._on_zoom_reset)
+        self._app.accept('mouse3', self._on_right_down)
+        self._app.accept('mouse3-up', self._on_right_up)
+        self._pan_mouse_prev = None
+        self._panning = False
+        self._app.taskMgr.add(self._pan_task, "multi_replay_pan")
 
         self._initialised = True
 
@@ -1037,13 +1055,12 @@ class MultiPanda3DReplayVisualizer:
             return
 
         if self._focused_index is not None:
-            # Focus mode: single slot fills the full window
             for slot in self._slots:
                 if slot.index == self._focused_index:
                     aspect = width / height
                     lens = slot.camera_np.node().getLens()
-                    film_h = lens.getFilmSize().getY()
-                    lens.setFilmSize(film_h * aspect, film_h)
+                    slot.film_w = slot.film_h * aspect
+                    lens.setFilmSize(slot.film_w, slot.film_h)
                     return
             return
 
@@ -1054,9 +1071,9 @@ class MultiPanda3DReplayVisualizer:
             return
         slot_aspect = slot_w / slot_h
         for slot in self._slots:
+            slot.film_w = slot.film_h * slot_aspect
             lens = slot.camera_np.node().getLens()
-            film_h = lens.getFilmSize().getY()
-            lens.setFilmSize(film_h * slot_aspect, film_h)
+            lens.setFilmSize(slot.film_w, slot.film_h)
 
     # ── focus / unfocus ─────────────────────────────────────────
 
@@ -1076,8 +1093,17 @@ class MultiPanda3DReplayVisualizer:
 
     def unfocus(self):
         """Restore grid layout — all slots visible at original positions."""
+        self._panning = False
+        self._pan_mouse_prev = None
         self._focused_index = None
         for slot in self._slots:
+            # 还原缩放和平移
+            slot.film_w = slot.original_film_w
+            slot.film_h = slot.original_film_h
+            lens = slot.camera_np.node().getLens()
+            lens.setFilmSize(slot.film_w, slot.film_h)
+            ox, oy, oz = slot.original_cam_pos
+            slot.camera_np.setPos(ox, oy, oz)
             if slot.original_dr_dims:
                 l, r, b, t = slot.original_dr_dims
                 slot.display_region.setDimensions(l, r, b, t)
@@ -1109,6 +1135,95 @@ class MultiPanda3DReplayVisualizer:
             if left <= nx <= right and bottom <= ny <= top:
                 if self._on_click_callback is not None:
                     self._on_click_callback(slot.index)
+                return
+
+    def _get_slot_under_mouse(self) -> "ReplaySlot | None":
+        """返回鼠标所在的 slot，聚焦模式下直接返回聚焦 slot。"""
+        if self._focused_index is not None:
+            for slot in self._slots:
+                if slot.index == self._focused_index:
+                    return slot
+            return None
+        if self._app is None or not self._app.mouseWatcherNode.hasMouse():
+            return None
+        mx = self._app.mouseWatcherNode.getMouseX()
+        my = self._app.mouseWatcherNode.getMouseY()
+        nx = (mx + 1.0) / 2.0
+        ny = (my + 1.0) / 2.0
+        for slot in self._slots:
+            dims = slot.original_dr_dims
+            if dims is None:
+                continue
+            left, right, bottom, top = dims
+            if left <= nx <= right and bottom <= ny <= top:
+                return slot
+        return None
+
+    def _on_right_down(self):
+        if self._focused_index is None:
+            return
+        self._panning = True
+        self._pan_mouse_prev = None
+
+    def _on_right_up(self):
+        self._panning = False
+        self._pan_mouse_prev = None
+
+    def _pan_task(self, task):
+        """聚焦模式下右键拖动平移相机。"""
+        if not self._panning or self._focused_index is None:
+            return task.cont
+        if self._app is None or not self._app.mouseWatcherNode.hasMouse():
+            return task.cont
+        mx = self._app.mouseWatcherNode.getMouseX()
+        my = self._app.mouseWatcherNode.getMouseY()
+        if self._pan_mouse_prev is not None:
+            dx = mx - self._pan_mouse_prev[0]
+            dy = my - self._pan_mouse_prev[1]
+            for slot in self._slots:
+                if slot.index == self._focused_index:
+                    scale = slot.film_w * 0.5
+                    pos = slot.camera_np.getPos()
+                    slot.camera_np.setPos(
+                        pos.x - dx * scale,
+                        pos.y,
+                        pos.z - dy * scale,
+                    )
+                    break
+        self._pan_mouse_prev = (mx, my)
+        return task.cont
+
+    def _on_zoom(self, direction: int):
+        """滚轮缩放：仅在聚焦模式下生效。"""
+        if self._focused_index is None:
+            return
+        slot = self._get_slot_under_mouse()
+        if slot is None:
+            return
+        factor = 1.12
+        if direction < 0:
+            slot.film_w /= factor
+            slot.film_h /= factor
+        else:
+            slot.film_w *= factor
+            slot.film_h *= factor
+        slot.film_w = max(2.0, min(200.0, slot.film_w))
+        slot.film_h = max(2.0, min(200.0, slot.film_h))
+        lens = slot.camera_np.node().getLens()
+        lens.setFilmSize(slot.film_w, slot.film_h)
+
+    def _on_zoom_reset(self):
+        """鼠标中键：仅在聚焦模式下还原缩放和平移。"""
+        if self._focused_index is None:
+            return
+        for slot in self._slots:
+            if slot.index == self._focused_index:
+                slot.film_w = slot.original_film_w
+                slot.film_h = slot.original_film_h
+                lens = slot.camera_np.node().getLens()
+                lens.setFilmSize(slot.film_w, slot.film_h)
+                ox, oy, oz = slot.original_cam_pos
+                slot.camera_np.setPos(ox, oy, oz)
                 return
 
     # ── private helpers ──────────────────────────────────────────

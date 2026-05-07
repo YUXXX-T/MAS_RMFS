@@ -1545,7 +1545,8 @@ class MultiReplayUI(QMainWindow):
         hint = QLabel(
             "Space: Play/Pause  |  Left/Right: Step\n"
             "Up/Down: Speed  |  Home/End: Jump\n"
-            "Click trajectory to focus  |  Esc: Back"
+            "Scroll: Zoom  |  Middle: Reset Zoom\n"
+            "Click to focus  |  Esc: Back"
         )
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("font-size: 10px; color: #888;")
