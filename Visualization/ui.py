@@ -19,7 +19,7 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QSlider, QLabel, QFrame, QGroupBox, QSizePolicy,
-    QSplitter,
+    QSplitter, QScrollArea, QGridLayout,
 )
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont
@@ -1417,9 +1417,19 @@ class MultiReplayUI(QMainWindow):
         info_row.addWidget(self._layout_label)
         info_row.addWidget(self._count_label)
         status_layout.addLayout(info_row)
+
+        import math as _math
+        self._total_grid_rows = _math.ceil(n / grid_cols) if grid_cols > 0 else 1
+        self._page_label = QLabel("")
+        self._page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._page_label.setStyleSheet("font-size: 11px; color: #6c63ff;")
+        if self._total_grid_rows > grid_rows:
+            self._page_label.setText(
+                f"Rows 1-{grid_rows} of {self._total_grid_rows}  (scroll to navigate)")
+        status_layout.addWidget(self._page_label)
         lo.addWidget(status_box)
 
-        # ── 控件 ──
+        #── 控件 ──
         ctrl_box = QGroupBox("Controls")
         ctrl_layout = QVBoxLayout(ctrl_box)
 
@@ -1906,6 +1916,14 @@ class MultiReplayUI(QMainWindow):
         self._frame_slider.setValue(idx)
         self._frame_slider.blockSignals(False)
 
+        if hasattr(self, '_page_label') and hasattr(self, '_total_grid_rows'):
+            grid_rows, grid_cols = self._layout
+            if self._total_grid_rows > grid_rows:
+                offset = self._viz.scroll_offset if self._viz._initialised else 0
+                start = offset + 1
+                end = min(offset + grid_rows, self._total_grid_rows)
+                self._page_label.setText(
+                    f"Rows {start}-{end} of {self._total_grid_rows}")
     # ── 控件回调 ──────────────────────────────────────────────────
 
     def _toggle_pause(self):
@@ -1993,6 +2011,21 @@ class MultiReplayUI(QMainWindow):
         else:
             super().keyPressEvent(event)
 
+    def wheelEvent(self, event):
+        """鼠标滚轮事件：网格模式下通知 Panda3D 滚动。"""
+        if (self._focused_slot_index is None and self._viz._initialised
+                and hasattr(self, '_total_grid_rows')):
+            grid_rows, _ = self._layout
+            if self._total_grid_rows > grid_rows:
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    self._viz.scroll_to(self._viz.scroll_offset - 1)
+                elif delta < 0:
+                    self._viz.scroll_to(self._viz.scroll_offset + 1)
+                event.accept()
+                return
+        super().wheelEvent(event)
+
     def closeEvent(self, event):
         event.accept()
 
@@ -2004,6 +2037,807 @@ class MultiReplayUI(QMainWindow):
         print("=" * 60)
         print(f"MAS-RMFS Multi-Trajectory Replay (Panda3D)")
         print(f"  Layout: {grid_rows}x{grid_cols}  ({n} trajectories)")
+        print("-" * 60)
+        for i, data in enumerate(self._datasets):
+            print(f"  [{i}] {self._labels[i]}")
+            print(f"      Map: {data.rows}x{data.cols}, "
+                  f"Agents: {data.num_agents}, Frames: {data.total_ticks}")
+        print("=" * 60)
+        self.show()
+        self._qt_app.exec()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 列表模式 — 轨迹卡片 + 点击聚焦
+# ═══════════════════════════════════════════════════════════════════
+
+_CARD_DARK_STYLE = """
+QFrame#trajCard {
+    background-color: #1e1e3a;
+    border: 1px solid #333355;
+    border-radius: 8px;
+    padding: 10px;
+}
+QFrame#trajCard:hover {
+    border-color: #6c63ff;
+    background-color: #24244a;
+}
+"""
+
+_CARD_LIGHT_STYLE = """
+QFrame#trajCard {
+    background-color: #ffffff;
+    border: 1px solid #ccccdd;
+    border-radius: 8px;
+    padding: 10px;
+}
+QFrame#trajCard:hover {
+    border-color: #4361ee;
+    background-color: #f0f0ff;
+}
+"""
+
+
+class _TrajectoryCard(QFrame):
+    """列表模式中每个轨迹数据包的卡片控件。"""
+
+    def __init__(self, index: int, data, label: str,
+                 night_mode: bool, on_click):
+        super().__init__()
+        self.setObjectName("trajCard")
+        self._index = index
+        self._on_click = on_click
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(_CARD_DARK_STYLE if night_mode else _CARD_LIGHT_STYLE)
+        self.setMinimumHeight(120)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(4)
+
+        # 标题行
+        title_row = QHBoxLayout()
+        idx_label = QLabel(f"[{index}]")
+        idx_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        idx_label.setStyleSheet("color: #6c63ff;" if night_mode else "color: #4361ee;")
+        title_row.addWidget(idx_label)
+
+        name_label = QLabel(label)
+        name_label.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        title_row.addWidget(name_label)
+        title_row.addStretch()
+
+        if data.record_time:
+            time_label = QLabel(data.record_time)
+            time_label.setStyleSheet("font-size: 10px; color: #888;")
+            title_row.addWidget(time_label)
+        layout.addLayout(title_row)
+
+        # 静态指标行
+        static_row = QHBoxLayout()
+        clr = "#aaa" if night_mode else "#666"
+        for text in [
+            f"Map: {data.rows}×{data.cols}",
+            f"Robots: {data.num_agents}",
+            f"Frames: {data.total_ticks}",
+            f"Stations: {len(data.stations)}",
+            f"Pods: {len(data.pod_homes)}",
+        ]:
+            lbl = QLabel(text)
+            lbl.setStyleSheet(f"font-size: 11px; color: {clr};")
+            static_row.addWidget(lbl)
+        static_row.addStretch()
+        layout.addLayout(static_row)
+
+        # 动态指标行
+        self._frame_label = QLabel("Frame: 0 / 0")
+        self._frame_label.setStyleSheet("font-size: 11px; font-weight: bold;")
+        layout.addWidget(self._frame_label)
+
+        self._status_label = QLabel("")
+        self._status_label.setStyleSheet(f"font-size: 10px; color: {clr};")
+        layout.addWidget(self._status_label)
+
+    def update_metrics(self, frame_idx: int, total_frames: int,
+                       status_counts: dict, carrying: int):
+        self._frame_label.setText(f"Frame: {frame_idx} / {total_frames - 1}")
+        parts = []
+        for s in ("IDLE", "MOVING_TO_POD", "CARRYING", "DELIVERING",
+                  "RETURNING", "MOVING"):
+            cnt = status_counts.get(s, 0)
+            if cnt > 0:
+                parts.append(f"{s}: {cnt}")
+        if carrying > 0:
+            parts.append(f"Pods carried: {carrying}")
+        self._status_label.setText("  |  ".join(parts))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._on_click(self._index)
+        super().mousePressEvent(event)
+
+
+class ListReplayUI(QMainWindow):
+    """
+    列表模式的多轨迹回放 UI。
+
+    显示所有轨迹数据包的实时指标卡片列表，点击卡片进入
+    Panda3D 聚焦视图。
+    """
+
+    def __init__(
+        self,
+        datasets: list,
+        labels: list[str],
+        night_mode: bool = True,
+        initial_fps: int = 10,
+    ):
+        self._qt_app = QApplication.instance() or QApplication([])
+        super().__init__()
+        self._datasets = datasets
+        self._labels = labels
+        self._night_mode = night_mode
+        self._initial_fps = max(1, min(60, initial_fps))
+
+        from TrajectoryRecord.replay_state import ReplayWorldState
+        self._replay_worlds = [ReplayWorldState(d) for d in datasets]
+        self._max_frames = max(rw.total_frames for rw in self._replay_worlds)
+        self._current_frame = 0
+        self._paused = True
+        self._speed = 1
+        self._frame_interval = 1.0 / self._initial_fps
+        self._last_advance_time = 0.0
+
+        # 聚焦模式
+        self._focused_index: int | None = None
+        self._viz = None
+        self._panda_embedded = False
+        self._chart_visible = False
+        self._chart_last_frame = -1
+        self._density = None
+        self._status_history = []
+
+        self._cards: list[_TrajectoryCard] = []
+        self._build_ui()
+        self.setStyleSheet(_DARK_STYLE if night_mode else _LIGHT_STYLE)
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._on_timer)
+        self._timer.start(16)
+
+    # ── UI 构建 ───────────────────────────────────────────────
+
+    def _build_ui(self):
+        n = len(self._datasets)
+        self.setWindowTitle(
+            f"MAS-RMFS  —  List Replay ({n} trajectories)")
+        self.resize(1500, 950)
+
+        inner_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.setCentralWidget(inner_splitter)
+
+        # 左侧面板
+        left_widget = QWidget()
+        left_widget.setMinimumWidth(300)
+        left_widget.setMaximumWidth(420)
+        lo = QVBoxLayout(left_widget)
+        lo.setContentsMargins(12, 12, 12, 12)
+        lo.setSpacing(10)
+
+        title = QLabel("\U0001f4cb List Replay")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        lo.addWidget(title)
+
+        # 回放状态
+        status_box = QGroupBox("Playback")
+        status_layout = QVBoxLayout(status_box)
+
+        self._status_label = QLabel("⏸  PAUSED")
+        self._status_label.setObjectName("statusLabel")
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_layout.addWidget(self._status_label)
+
+        self._frame_label = QLabel("Frame: 0 / 0")
+        self._frame_label.setObjectName("tickLabel")
+        self._frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_layout.addWidget(self._frame_label)
+
+        self._count_label = QLabel(f"Files: {n}")
+        self._count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_layout.addWidget(self._count_label)
+        lo.addWidget(status_box)
+
+        # 控件
+        ctrl_box = QGroupBox("Controls")
+        ctrl_layout = QVBoxLayout(ctrl_box)
+
+        btn_row = QHBoxLayout()
+        self._play_btn = QPushButton("▶  Play")
+        self._play_btn.setObjectName("playBtn")
+        self._play_btn.clicked.connect(self._toggle_pause)
+        btn_row.addWidget(self._play_btn)
+
+        self._prev_btn = QPushButton("⏮  Prev")
+        self._prev_btn.clicked.connect(lambda: self._step(-1))
+        btn_row.addWidget(self._prev_btn)
+
+        self._next_btn = QPushButton("Next  ⏭")
+        self._next_btn.clicked.connect(lambda: self._step(1))
+        btn_row.addWidget(self._next_btn)
+        ctrl_layout.addLayout(btn_row)
+
+        slider_label = QLabel("\U0001f39e  Frame")
+        slider_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ctrl_layout.addWidget(slider_label)
+
+        self._frame_slider = QSlider(Qt.Orientation.Horizontal)
+        self._frame_slider.setRange(0, max(0, self._max_frames - 1))
+        self._frame_slider.setValue(0)
+        self._frame_slider.valueChanged.connect(self._on_frame_slider)
+        ctrl_layout.addWidget(self._frame_slider)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        ctrl_layout.addWidget(sep)
+
+        fps_label = QLabel("⏱  Playback FPS")
+        fps_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ctrl_layout.addWidget(fps_label)
+
+        fps_row = QHBoxLayout()
+        self._fps_slider = QSlider(Qt.Orientation.Horizontal)
+        self._fps_slider.setRange(1, 60)
+        self._fps_slider.setValue(self._initial_fps)
+        self._fps_slider.valueChanged.connect(self._on_fps_change)
+        fps_row.addWidget(self._fps_slider)
+
+        self._fps_value = QLabel(f"{self._initial_fps} fps")
+        self._fps_value.setMinimumWidth(55)
+        fps_row.addWidget(self._fps_value)
+        ctrl_layout.addLayout(fps_row)
+
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(4)
+        for label_text, val in [("2fps", 2), ("5fps", 5), ("10fps", 10),
+                                ("30fps", 30), ("60fps", 60)]:
+            btn = QPushButton(label_text)
+            btn.setObjectName("speedPreset")
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding,
+                              QSizePolicy.Policy.Fixed)
+            btn.clicked.connect(lambda _, v=val: self._set_fps(v))
+            preset_row.addWidget(btn)
+        ctrl_layout.addLayout(preset_row)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setFrameShadow(QFrame.Shadow.Sunken)
+        ctrl_layout.addWidget(sep2)
+
+        step_label = QLabel("⏩  Step Size")
+        step_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ctrl_layout.addWidget(step_label)
+
+        step_row = QHBoxLayout()
+        self._speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self._speed_slider.setRange(1, 50)
+        self._speed_slider.setValue(1)
+        self._speed_slider.valueChanged.connect(self._on_speed_change)
+        step_row.addWidget(self._speed_slider)
+
+        self._speed_value = QLabel("x1")
+        self._speed_value.setMinimumWidth(40)
+        step_row.addWidget(self._speed_value)
+        ctrl_layout.addLayout(step_row)
+        lo.addWidget(ctrl_box)
+
+        # 聚焦模式控件（默认隐藏）
+        self._back_btn = QPushButton("⬅  Back to List")
+        self._back_btn.setObjectName("chartBtn")
+        self._back_btn.setVisible(False)
+        self._back_btn.clicked.connect(self._unfocus)
+        lo.addWidget(self._back_btn)
+
+        self._focus_label = QLabel("")
+        self._focus_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._focus_label.setStyleSheet(
+            "font-size: 12px; color: #6c63ff; font-weight: bold;")
+        self._focus_label.setVisible(False)
+        lo.addWidget(self._focus_label)
+
+        self._chart_btn = QPushButton("\U0001f4ca  Show Charts")
+        self._chart_btn.setObjectName("chartBtn")
+        self._chart_btn.setVisible(False)
+        self._chart_btn.clicked.connect(self._toggle_charts)
+        lo.addWidget(self._chart_btn)
+
+        lo.addStretch()
+
+        hint = QLabel(
+            "Space: Play/Pause  |  Left/Right: Step\n"
+            "Up/Down: Speed  |  Home/End: Jump\n"
+            "Click card to focus  |  Esc: Back"
+        )
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setStyleSheet("font-size: 10px; color: #888;")
+        lo.addWidget(hint)
+
+        inner_splitter.addWidget(left_widget)
+
+        # 右侧面板
+        self._right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._right_splitter.setMinimumSize(600, 400)
+
+        # 卡片滚动区域
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(10, 10, 10, 10)
+        scroll_layout.setSpacing(10)
+        for i, data in enumerate(self._datasets):
+            card = _TrajectoryCard(
+                index=i, data=data, label=self._labels[i],
+                night_mode=self._night_mode, on_click=self._focus_on,
+            )
+            self._cards.append(card)
+            scroll_layout.addWidget(card)
+        scroll_layout.addStretch()
+        self._scroll_area.setWidget(scroll_content)
+        self._right_splitter.addWidget(self._scroll_area)
+
+        self._panda_container = QWidget()
+        self._panda_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._panda_container.setMinimumHeight(0)
+        self._right_splitter.addWidget(self._panda_container)
+
+        self._charts_panel = self._build_charts_panel()
+        self._charts_panel.setMinimumHeight(0)
+        self._right_splitter.addWidget(self._charts_panel)
+
+        self._right_splitter.setCollapsible(0, True)
+        self._right_splitter.setCollapsible(1, True)
+        self._right_splitter.setCollapsible(2, True)
+        self._right_splitter.setSizes([1, 0, 0])
+
+        inner_splitter.addWidget(self._right_splitter)
+        inner_splitter.setStretchFactor(0, 0)
+        inner_splitter.setStretchFactor(1, 1)
+        inner_splitter.setSizes([340, 1160])
+
+    # ── Panda3D 嵌入 ─────────────────────────────────────────────
+
+    def _ensure_visualizer(self):
+        if self._viz is not None:
+            return
+        from Visualization.panda3d_visualizer import Panda3DVisualizer
+        self._viz = Panda3DVisualizer(
+            view_mode="2d", use_gpu=False, night_mode=self._night_mode)
+
+    def _embed_panda(self):
+        handle = int(self._panda_container.winId())
+        self._viz._parent_window_handle = handle
+        dpr = self._panda_container.devicePixelRatio()
+        self._viz._parent_initial_size = (
+            int(self._panda_container.width() * dpr),
+            int(self._panda_container.height() * dpr),
+        )
+        self._panda_embedded = True
+
+    def _resize_panda(self):
+        if (self._viz is None or self._viz._app is None
+                or self._viz._app.win is None or not self._panda_embedded):
+            return
+        from panda3d.core import WindowProperties
+        dpr = self._panda_container.devicePixelRatio()
+        w = int(self._panda_container.width() * dpr)
+        h = int(self._panda_container.height() * dpr)
+        if w > 0 and h > 0:
+            wp = WindowProperties()
+            wp.setSize(w, h)
+            wp.setOrigin(0, 0)
+            self._viz._app.win.requestProperties(wp)
+            self._viz.on_window_resize(w, h)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._focused_index is not None:
+            self._resize_panda()
+
+    # ── 图表 ─────────────────────────────────────────────────────
+
+    def _build_charts_panel(self):
+        nm = self._night_mode
+        bg = "#0f0f1a" if nm else "#f5f5f8"
+        ax_bg = "#16162a" if nm else "#ffffff"
+        self._chart_tick_clr = "#aaaaaa" if nm else "#333333"
+        self._chart_spine_clr = "#333355" if nm else "#bbbbcc"
+        self._chart_title_clr = "#e0e0e0" if nm else "#222222"
+        self._chart_ax_bg = ax_bg
+        idle_clr = "#1a1a2e" if nm else "#dddde8"
+
+        self._timeline_cmap = ListedColormap([
+            idle_clr, "#4361ee", "#f0a500",
+            "#e07c24", "#7b2cbf", "#2ec4b6",
+        ])
+
+        panel = QWidget()
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(2, 2, 2, 2)
+
+        fig = plt.figure(figsize=(14, 3.5), facecolor=bg)
+        self._chart_fig = fig
+        axes = fig.subplots(1, 2)
+        self._chart_axes = axes
+        for ax in axes:
+            ax.set_facecolor(ax_bg)
+            ax.tick_params(colors=self._chart_tick_clr, labelsize=7)
+            for sp in ax.spines.values():
+                sp.set_color(self._chart_spine_clr)
+
+        self._charts_canvas = FigureCanvasQTAgg(fig)
+        self._charts_canvas.setMinimumHeight(150)
+        panel_layout.addWidget(self._charts_canvas)
+        return panel
+
+    def _compute_chart_data(self):
+        si = self._focused_index
+        if si is None:
+            return
+        rw = self._replay_worlds[si]
+        data = self._datasets[si]
+        idx = rw.current_frame_index
+        if idx == self._chart_last_frame:
+            return
+        self._chart_last_frame = idx
+
+        rows, cols = data.rows, data.cols
+        self._density = np.zeros((rows, cols), dtype=float)
+        self._status_history = []
+        for i in range(min(idx + 1, len(data.frames))):
+            frame = data.frames[i]
+            codes = []
+            for agent in frame["agents"]:
+                r, c = agent["pos"]
+                self._density[r, c] += 1.0
+                codes.append(_STATUS_CODES.get(agent.get("status", "IDLE"), 0))
+            self._status_history.append(codes)
+
+    def _redraw_charts(self):
+        self._compute_chart_data()
+        for ax in self._chart_axes:
+            ax.clear()
+            ax.set_facecolor(self._chart_ax_bg)
+            ax.tick_params(colors=self._chart_tick_clr, labelsize=7)
+            for sp in ax.spines.values():
+                sp.set_color(self._chart_spine_clr)
+
+        self._draw_density(self._chart_axes[0])
+        self._draw_timeline(self._chart_axes[1])
+        self._chart_fig.tight_layout(pad=1.5)
+        self._charts_canvas.draw_idle()
+
+    def _draw_density(self, ax):
+        if self._density is None:
+            return
+        ax.imshow(self._density, cmap="YlOrRd", origin="upper",
+                  aspect="equal", interpolation="nearest")
+        ax.set_title("Path Density (cumulative)", color=self._chart_title_clr,
+                      fontsize=10, pad=6)
+
+    def _draw_timeline(self, ax):
+        if not self._status_history or self._focused_index is None:
+            return
+        n_agents = self._datasets[self._focused_index].num_agents
+        n_ticks = len(self._status_history)
+        mat = np.zeros((n_agents, n_ticks), dtype=int)
+        for t, row in enumerate(self._status_history):
+            for a, code in enumerate(row):
+                if a < n_agents:
+                    mat[a, t] = code
+
+        ax.imshow(mat, cmap=self._timeline_cmap, aspect="auto",
+                  origin="upper", vmin=0, vmax=5, interpolation="nearest")
+        ax.axvline(n_ticks - 1, color="white", linewidth=0.8, alpha=0.6)
+
+        if n_agents <= 30:
+            ax.set_yticks(range(n_agents))
+            ax.set_yticklabels([f"R{i}" for i in range(n_agents)])
+        ax.set_xlabel("Frame", color=self._chart_tick_clr, fontsize=8)
+        ax.set_title("Agent Status Timeline", color=self._chart_title_clr,
+                      fontsize=10, pad=6)
+
+        patches = [Patch(facecolor=self._timeline_cmap.colors[i], label=lbl)
+                   for i, lbl in enumerate(_STATUS_LABELS)]
+        ax.legend(handles=patches, loc="lower left", fontsize=5, ncol=3,
+                  framealpha=0.6, facecolor=self._chart_ax_bg,
+                  edgecolor=self._chart_spine_clr,
+                  labelcolor=self._chart_tick_clr)
+
+    # ── 聚焦 / 取消聚焦 ──────────────────────────────────────────
+
+    def _focus_on(self, index: int):
+        self._focused_index = index
+
+        self._density = None
+        self._status_history = []
+        self._chart_last_frame = -1
+        self._chart_visible = True
+        self._chart_btn.setText("\U0001f4ca  Hide Charts")
+
+        total_h = self._right_splitter.height()
+        chart_h = max(180, total_h // 4)
+        self._right_splitter.setSizes([0, total_h - chart_h, chart_h])
+        QApplication.processEvents()
+
+        self._ensure_visualizer()
+        if not self._panda_embedded:
+            self._embed_panda()
+
+        rw = self._replay_worlds[index]
+        if not self._viz._initialised:
+            self._viz.setup(rw)
+        else:
+            self._viz.switch_world(rw)
+            self._resize_panda()
+
+        self._frame_slider.setRange(0, max(0, rw.total_frames - 1))
+        self._frame_slider.setValue(rw.current_frame_index)
+
+        self._back_btn.setVisible(True)
+        self._focus_label.setText(
+            f"Focused: [{index}] {self._labels[index]}")
+        self._focus_label.setVisible(True)
+        self._chart_btn.setVisible(True)
+
+        self.setWindowTitle(
+            f"MAS-RMFS  —  Focused: {self._labels[index]}")
+
+        for delay in (50, 200, 500):
+            QTimer.singleShot(delay, self._resize_panda)
+
+    def _unfocus(self):
+        if self._focused_index is None:
+            return
+        focused_rw = self._replay_worlds[self._focused_index]
+        self._current_frame = focused_rw.current_frame_index
+        self._focused_index = None
+
+        self._chart_visible = False
+
+        total_h = self._right_splitter.height()
+        self._right_splitter.setSizes([total_h, 0, 0])
+
+        self._frame_slider.setRange(0, max(0, self._max_frames - 1))
+        self._frame_slider.setValue(self._current_frame)
+
+        for rw in self._replay_worlds:
+            rw.set_frame(min(self._current_frame, rw.total_frames - 1))
+
+        self._back_btn.setVisible(False)
+        self._focus_label.setVisible(False)
+        self._chart_btn.setVisible(False)
+
+        n = len(self._datasets)
+        self.setWindowTitle(
+            f"MAS-RMFS  —  List Replay ({n} trajectories)")
+
+    def _toggle_charts(self):
+        self._chart_visible = not self._chart_visible
+        if self._chart_visible:
+            self._chart_btn.setText("\U0001f4ca  Hide Charts")
+            total_h = self._right_splitter.height()
+            chart_h = max(180, total_h // 4)
+            self._right_splitter.setSizes([0, total_h - chart_h, chart_h])
+            self._chart_last_frame = -1
+            self._redraw_charts()
+        else:
+            self._chart_btn.setText("\U0001f4ca  Show Charts")
+            total_h = self._right_splitter.height()
+            self._right_splitter.setSizes([0, total_h, 0])
+        QTimer.singleShot(50, self._resize_panda)
+
+    # ── 指标计算 ──────────────────────────────────────────────────
+
+    def _compute_card_metrics(self, index: int):
+        rw = self._replay_worlds[index]
+        data = self._datasets[index]
+        frame_idx = rw.current_frame_index
+        if frame_idx >= len(data.frames):
+            return
+        frame = data.frames[frame_idx]
+        status_counts: dict[str, int] = {}
+        carrying = 0
+        for agent in frame["agents"]:
+            s = agent.get("status", "IDLE")
+            status_counts[s] = status_counts.get(s, 0) + 1
+            if agent.get("pod") is not None:
+                carrying += 1
+        self._cards[index].update_metrics(
+            frame_idx, rw.total_frames, status_counts, carrying)
+
+    def _update_all_cards(self):
+        for i in range(len(self._datasets)):
+            self._compute_card_metrics(i)
+
+    # ── 回放逻辑 ──────────────────────────────────────────────────
+
+    def _on_timer(self):
+        now = time.time()
+
+        if not self._paused and now - self._last_advance_time >= self._frame_interval:
+            if self._focused_index is not None:
+                rw = self._replay_worlds[self._focused_index]
+                new_frame = rw.current_frame_index + self._speed
+                if new_frame >= rw.total_frames:
+                    new_frame = rw.total_frames - 1
+                    self._paused = True
+                    self._play_btn.setText("▶  Play")
+                    self._status_label.setText("⏹  END")
+                    self._status_label.setStyleSheet(
+                        "color: #e74c3c; font-size: 14px; font-weight: bold;")
+                rw.set_frame(new_frame)
+            else:
+                new_frame = self._current_frame + self._speed
+                if new_frame >= self._max_frames:
+                    new_frame = self._max_frames - 1
+                    self._paused = True
+                    self._play_btn.setText("▶  Play")
+                    self._status_label.setText("⏹  END")
+                    self._status_label.setStyleSheet(
+                        "color: #e74c3c; font-size: 14px; font-weight: bold;")
+                self._current_frame = new_frame
+                for rw in self._replay_worlds:
+                    rw.set_frame(min(new_frame, rw.total_frames - 1))
+            self._last_advance_time = now
+
+        # 聚焦模式：驱动 Panda3D
+        if self._focused_index is not None and self._viz is not None and self._viz._initialised:
+            world = self._replay_worlds[self._focused_index]
+            self._viz._update_agents(world)
+            self._viz._update_pods(world)
+            self._viz._update_hud(world)
+            self._viz._app.taskMgr.step()
+            if self._chart_visible:
+                self._redraw_charts()
+        else:
+            self._update_all_cards()
+
+        self._update_info()
+
+    def _step(self, delta: int):
+        if self._focused_index is not None:
+            rw = self._replay_worlds[self._focused_index]
+            new_frame = max(0, min(rw.total_frames - 1,
+                                   rw.current_frame_index + delta))
+            rw.set_frame(new_frame)
+            self._frame_slider.blockSignals(True)
+            self._frame_slider.setValue(new_frame)
+            self._frame_slider.blockSignals(False)
+        else:
+            new_frame = max(0, min(self._max_frames - 1,
+                                   self._current_frame + delta))
+            self._current_frame = new_frame
+            for rw in self._replay_worlds:
+                rw.set_frame(min(new_frame, rw.total_frames - 1))
+            self._frame_slider.blockSignals(True)
+            self._frame_slider.setValue(new_frame)
+            self._frame_slider.blockSignals(False)
+
+    def _update_info(self):
+        if self._focused_index is not None:
+            rw = self._replay_worlds[self._focused_index]
+            idx = rw.current_frame_index
+            self._frame_label.setText(f"Frame: {idx} / {rw.total_frames - 1}")
+        else:
+            idx = self._current_frame
+            self._frame_label.setText(f"Frame: {idx} / {self._max_frames - 1}")
+        self._frame_slider.blockSignals(True)
+        self._frame_slider.setValue(idx)
+        self._frame_slider.blockSignals(False)
+
+    # ── 控件回调 ──────────────────────────────────────────────────
+
+    def _toggle_pause(self):
+        self._paused = not self._paused
+        if self._paused:
+            self._play_btn.setText("▶  Play")
+            self._status_label.setText("⏸  PAUSED")
+            self._status_label.setStyleSheet(
+                "color: #f0a500; font-size: 14px; font-weight: bold;")
+        else:
+            if self._focused_index is not None:
+                rw = self._replay_worlds[self._focused_index]
+                if rw.current_frame_index >= rw.total_frames - 1:
+                    rw.set_frame(0)
+            else:
+                if self._current_frame >= self._max_frames - 1:
+                    self._current_frame = 0
+                    for rw in self._replay_worlds:
+                        rw.set_frame(0)
+            self._play_btn.setText("⏸  Pause")
+            self._status_label.setText("▶  PLAYING")
+            self._status_label.setStyleSheet(
+                "color: #2ecc71; font-size: 14px; font-weight: bold;")
+            self._last_advance_time = time.time()
+
+    def _on_frame_slider(self, value):
+        if self._focused_index is not None:
+            self._replay_worlds[self._focused_index].set_frame(value)
+        else:
+            self._current_frame = value
+            for rw in self._replay_worlds:
+                rw.set_frame(min(value, rw.total_frames - 1))
+
+    def _on_fps_change(self, value):
+        self._frame_interval = 1.0 / value
+        self._fps_value.setText(f"{value} fps")
+
+    def _set_fps(self, fps: int):
+        self._frame_interval = 1.0 / fps
+        self._fps_slider.setValue(fps)
+        self._fps_value.setText(f"{fps} fps")
+
+    def _on_speed_change(self, value):
+        self._speed = value
+        self._speed_value.setText(f"x{value}")
+
+    def _set_speed(self, speed: int):
+        self._speed = speed
+        self._speed_slider.setValue(speed)
+        self._speed_value.setText(f"x{speed}")
+
+    # ── 键盘 ─────────────────────────────────────────────────────
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self._unfocus()
+        elif event.key() == Qt.Key.Key_Space:
+            self._toggle_pause()
+        elif event.key() == Qt.Key.Key_Left:
+            self._step(-1)
+        elif event.key() == Qt.Key.Key_Right:
+            self._step(1)
+        elif event.key() == Qt.Key.Key_Up:
+            self._set_speed(min(50, self._speed + 1))
+        elif event.key() == Qt.Key.Key_Down:
+            self._set_speed(max(1, self._speed - 1))
+        elif event.key() == Qt.Key.Key_Home:
+            if self._focused_index is not None:
+                self._replay_worlds[self._focused_index].set_frame(0)
+            else:
+                self._current_frame = 0
+                for rw in self._replay_worlds:
+                    rw.set_frame(0)
+        elif event.key() == Qt.Key.Key_End:
+            if self._focused_index is not None:
+                rw = self._replay_worlds[self._focused_index]
+                rw.set_frame(rw.total_frames - 1)
+            else:
+                self._current_frame = self._max_frames - 1
+                for rw in self._replay_worlds:
+                    rw.set_frame(min(self._max_frames - 1, rw.total_frames - 1))
+        elif event.key() == Qt.Key.Key_C:
+            if self._focused_index is not None:
+                self._toggle_charts()
+        else:
+            super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        event.accept()
+
+    # ── 公共 API ────────────────────────────────────────────────
+
+    def run(self):
+        n = len(self._datasets)
+        print("=" * 60)
+        print(f"MAS-RMFS List-Mode Replay")
+        print(f"  Files: {n}")
         print("-" * 60)
         for i, data in enumerate(self._datasets):
             print(f"  [{i}] {self._labels[i]}")

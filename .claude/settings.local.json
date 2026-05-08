@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(F:/Anaconda3/envs/multi_robot/python.exe -c ' *)"
+    ]
+  }
+}

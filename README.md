@@ -135,7 +135,7 @@ python -c "from Env.rmfs_env import RMFSEnv; env = RMFSEnv(); print(env.possible
 
 ## ⚙️ 配置文件说明
 
-配置文件为 JSON 格式，包含四个顶层节点：
+配置文件为 JSON 格式，包含以下顶层节点：
 
 ```jsonc
 {
@@ -183,6 +183,10 @@ python -c "from Env.rmfs_env import RMFSEnv; env = RMFSEnv(); print(env.possible
             "params": { "max_horizon": 100, "goal_reserve": 10 }
         },
         "pod_return_planner": "HomeReturnPlanner"
+    },
+    "replay": {
+        "mode": "window",              // 回放模式："window"（网格窗口）或 "list"（卡片列表）
+        "layout": "auto"               // 网格布局："auto" 或显式指定如 "2x2"
     }
 }
 ```
@@ -478,10 +482,9 @@ python main.py --replay a.traj.json.gz b.traj.json.gz c.traj.json.gz --replay-la
 
 # 2x2 网格布局
 python main.py --replay f1.traj.json.gz f2.traj.json.gz f3.traj.json.gz f4.traj.json.gz --replay-layout 2x2
-& f:/Anaconda3/envs/multi_robot/python.exe f:/MAS_RMFS/main.py --replay .\TrajectoryRecord\test\Trajectory_first.json.gz .\TrajectoryRecord\test\Trajectory_second.json.gz .\TrajectoryRecord\test\Trajectory_third.json.gz .\TrajectoryRecord\test\Trajectory_fourth.json.gz --replay-layout 2x2  --replay-fps 5
-```
+& f:/Anaconda3/envs/multi_robot/python.exe f:/MAS_RMFS/main.py --replay .\TrajectoryRecord\test\Trajectory_first.json.gz .\TrajectoryRecord\test\Trajectory_second.json.gz .\TrajectoryRecord\test\Trajectory_third.json.gz .\TrajectoryRecord\test\Trajectory_fourth.json.gz --replay-fps 5
 
-> 单文件使用 `ReplayUI`；多文件使用 `MultiReplayUI`，所有轨迹在同一窗口的 RxC 网格中独立渲染，共享播放控件。
+```
 
 回放参数：
 
@@ -489,9 +492,47 @@ python main.py --replay f1.traj.json.gz f2.traj.json.gz f3.traj.json.gz f4.traj.
 |------|------|--------|
 | `--replay` | 轨迹数据文件路径（支持多个） | — |
 | `--replay-fps` | 回放帧率（1-60） | `10` |
-| `--replay-layout` | 多轨迹网格布局，如 `2x1`、`1x3`、`2x2` | 自动计算 |
+| `--replay-layout` | 多轨迹网格布局，如 `2x1`、`1x3`、`2x2`（也可在配置文件 `replay.layout` 中指定） | 自动计算 |
 
-回放窗口操作：
+> 单文件使用 `ReplayUI`；多文件根据配置中 `replay.mode` 选择 `MultiReplayUI`（窗口模式）或 `ListReplayUI`（列表模式）。
+
+### 🪟 窗口模式（Window Mode）
+
+默认多轨迹回放模式。所有轨迹在同一窗口的 RxC 网格中独立渲染，共享播放控件。
+
+**滚动支持**：当加载的轨迹文件数超过布局容量时（例如 6 个文件使用 `2x2` 布局），可使用 **鼠标滚轮** 在网格中上下滚动查看所有轨迹。左侧面板会显示当前页码（如 "Page 1/2"）。
+
+**聚焦模式**：点击网格中的某个子窗口可进入聚焦查看模式，Panda3D 渲染区将全屏显示该轨迹。按 `Esc` 或点击"Back to Grid"返回网格视图，滚动位置会自动保持。
+
+### 📋 列表模式（List Mode）
+
+在配置文件中设置 `"replay": {"mode": "list"}` 启用。以可滚动的卡片列表形式展示所有轨迹的实时指标，无需 Panda3D 渲染。
+
+每张卡片显示：
+- **静态信息**：文件名、地图尺寸、机器人数量、总帧数、工作站数、Pod 数
+- **动态指标**（随播放实时更新）：当前帧号、机器人状态分布（IDLE/MOVING/CARRYING 等）、正在搬运的 Pod 数量
+
+**聚焦视图**：点击任意卡片进入 Panda3D 聚焦视图（首次点击时懒加载 Panda3D 渲染器），可查看详细的地图动画和图表。按 `Esc` 或点击"Back to List"返回列表。
+
+```bash
+# 使用列表模式回放（需在配置文件中设置 mode 为 list）
+python main.py --replay run1.traj.json.gz run2.traj.json.gz run3.traj.json.gz
+```
+
+### 📝 回放配置（config JSON）
+
+回放模式和布局可在配置文件的 `replay` 段中指定，避免每次都在命令行传参：
+
+```jsonc
+"replay": {
+    "mode": "window",   // "window"（网格窗口）或 "list"（卡片列表）
+    "layout": "auto"    // "auto"（自动计算）或显式如 "2x2"、"1x3"
+}
+```
+
+布局优先级：CLI `--replay-layout` > 配置文件 `replay.layout` > 自动计算。
+
+### ⌨️ 回放窗口操作
 
 | 快捷键 | 功能 |
 |--------|------|
@@ -500,6 +541,8 @@ python main.py --replay f1.traj.json.gz f2.traj.json.gz f3.traj.json.gz f4.traj.
 | `Up` / `Down` | 加速 / 减速 |
 | `Home` / `End` | 跳转到首帧 / 末帧 |
 | `C` | 显示 / 隐藏图表面板 |
+| `Esc` | 从聚焦模式返回网格/列表 |
+| 鼠标滚轮 | 窗口模式下滚动网格页面 |
 
 左侧控制面板还提供 **FPS 滑块**（1-60fps）、**步长滑块**（每帧跳过 1-50 帧）和**帧进度条**。
 

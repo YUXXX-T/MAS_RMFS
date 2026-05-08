@@ -106,8 +106,10 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     if args.replay:
         from TrajectoryRecord import TrajectoryData
+        from Config.config_loader import load_replay_config
 
         logger = SimLogger("Main")
+        replay_config = load_replay_config(args.config)
         replay_files = args.replay
         n = len(replay_files)
 
@@ -122,7 +124,7 @@ def main():
             datasets.append(data)
             labels.append(os.path.basename(path))
 
-        # 解析或自动计算布局
+        # 解析或自动计算布局（优先级：CLI > config > auto）
         def _auto_layout(count: int) -> tuple:
             if count == 1:
                 return (1, 1)
@@ -132,21 +134,22 @@ def main():
             rows = math.ceil(count / cols)
             return (rows, cols)
 
-        if args.replay_layout:
-            parts = args.replay_layout.lower().split('x')
+        def _parse_layout(layout_str: str, source: str):
+            parts = layout_str.lower().split('x')
             if len(parts) != 2:
-                logger.error(f"Invalid layout format: '{args.replay_layout}'. "
+                logger.error(f"Invalid layout format from {source}: '{layout_str}'. "
                              f"Expected 'RxC', e.g. '2x1'.")
                 sys.exit(1)
-            layout = (int(parts[0]), int(parts[1]))
-            if layout[0] * layout[1] < n:
-                logger.error(f"Layout {layout[0]}x{layout[1]} has "
-                             f"{layout[0]*layout[1]} slots but {n} files given.")
-                sys.exit(1)
+            return (int(parts[0]), int(parts[1]))
+
+        if args.replay_layout:
+            layout = _parse_layout(args.replay_layout, "CLI")
+        elif replay_config.layout != "auto":
+            layout = _parse_layout(replay_config.layout, "config")
         else:
             layout = _auto_layout(n)
 
-        if n == 1 and not args.replay_layout:
+        if n == 1 and not args.replay_layout and replay_config.layout == "auto":
             # 单文件回放：使用原有的 ReplayUI（向后兼容）
             from Visualization.panda3d_visualizer import Panda3DVisualizer
             from Visualization.ui import ReplayUI
@@ -157,8 +160,20 @@ def main():
             ui = ReplayUI(data=datasets[0], visualizer=visualizer,
                           night_mode=True, initial_fps=args.replay_fps)
             ui.run()
+        elif replay_config.mode == "list":
+            # 列表模式
+            from Visualization.ui import ListReplayUI
+
+            logger.info(f"List-replay: files={n}")
+            ui = ListReplayUI(
+                datasets=datasets,
+                labels=labels,
+                night_mode=True,
+                initial_fps=args.replay_fps,
+            )
+            ui.run()
         else:
-            # 多文件回放：使用 MultiReplayUI
+            # 窗口模式（支持滚动：n 可以 > rows*cols）
             from Visualization.panda3d_visualizer import MultiPanda3DReplayVisualizer
             from Visualization.ui import MultiReplayUI
 

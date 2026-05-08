@@ -133,5 +133,9 @@
         "pod_return_planner": "HomeReturnPlanner",
         "pod_initializer": "DefaultPodInitializer",
         "pod_retriever": "DefaultPodRetriever"
+    },
+    "replay": {
+        "mode": "list",
+        "layout": "1x2"
     }
 }

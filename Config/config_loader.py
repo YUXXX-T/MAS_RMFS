@@ -138,6 +138,23 @@ class SimulationConfig:
     pods: PodsConfig = field(default_factory=PodsConfig)
 
 
+@dataclass
+class ReplayConfig:
+    """回放模式配置。"""
+    mode: str = "window"   # "window" 或 "list"
+    layout: str = "auto"   # "auto" 或 "RxC" 如 "2x2"
+
+
+def load_replay_config(path: str) -> ReplayConfig:
+    with open(path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    replay_raw = raw.get("replay", {})
+    return ReplayConfig(
+        mode=replay_raw.get("mode", "window"),
+        layout=replay_raw.get("layout", "auto"),
+    )
+
+
 def load_config(path: str) -> SimulationConfig:
     """
     Load a SimulationConfig from a JSON file.

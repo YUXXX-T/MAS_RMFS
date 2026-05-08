@@ -194,6 +194,181 @@ class Panda3DVisualizer(BaseVisualizer):
         # Pump one frame so the window stays responsive
         self._app.taskMgr.step()
 
+    def setup(self, world_state: "WorldState"):
+        """显式初始化（供 ListReplayUI 等外部调用）。"""
+        if not self._initialised:
+            self._setup(world_state)
+
+    def on_window_resize(self, width: int, height: int):
+        """Qt 容器大小变化时由外部调用。"""
+        if self._app is None or self._app.win is None:
+            return
+        if height == 0:
+            return
+        aspect = width / height
+        self._win_aspect = aspect
+        lens = self._app.cam.node().getLens()
+        if self._is_3d:
+            lens.setAspectRatio(aspect)
+        else:
+            self._ortho_film_w = self._ortho_film_h * aspect
+            lens.setFilmSize(self._ortho_film_w, self._ortho_film_h)
+
+    def switch_world(self, world_state: "WorldState"):
+        """切换到新的 WorldState，重建场景中的动态和静态节点。"""
+        from WorldState.map_state import CellType
+
+        # 清除所有渲染节点（保留相机）
+        cam_np = self._app.camera
+        for child in list(self._app.render.getChildren()):
+            if child != cam_np:
+                child.removeNode()
+        if self._hud_np is not None:
+            self._hud_np.removeNode()
+        self._pod_nodes.clear()
+        self._agent_nodes.clear()
+        self._agent_labels.clear()
+        self._glow_nodes.clear()
+
+        ms = world_state.map_state
+        rows, cols = ms.rows, ms.cols
+        is_3d = self._is_3d
+        self._map_size = (rows, cols)
+
+        # 调整相机
+        cx = (cols - 1) * CELL / 2
+        if is_3d:
+            cy_3d = -((rows - 1) * CELL / 2)
+            self._cam_pivot = LPoint3f(cx, cy_3d, 0)
+            self._cam_dist = max(rows, cols) * CELL * 1.5
+            self._update_orbit_camera()
+        else:
+            cz_2d = -((rows - 1) * CELL / 2)
+            half_w = cols * CELL / 2 + 1.0
+            half_h = rows * CELL / 2 + 1.0
+            self._ortho_film_w = half_w * 2
+            self._ortho_film_h = half_h * 2
+            lens = self._app.cam.node().getLens()
+            lens.setFilmSize(self._ortho_film_w, self._ortho_film_h)
+            self._app.cam.setPos(cx, -10, cz_2d)
+            self._app.cam.lookAt(cx, 0, cz_2d)
+
+        # 重建静态网格
+        if self._use_gpu:
+            rbc = RigidBodyCombiner("static_grid")
+            static_root = self._app.render.attachNewNode(rbc)
+        else:
+            static_root = self._app.render.attachNewNode("static_grid")
+
+        if is_3d:
+            self._build_grid_3d(static_root, ms, rows, cols)
+        else:
+            self._build_grid_2d(static_root, ms, rows, cols)
+
+        for sid, (sr, sc) in ms.station_positions.items():
+            tn = TextNode(f"station_{sid}")
+            tn.setText(f"S{sid}")
+            tn.setTextColor(1, 0.42, 0.50, 1)
+            tn.setAlign(TextNode.ACenter)
+            tn.setCardColor(0, 0, 0, 0.5)
+            tn.setCardAsMargin(0.05, 0.05, 0.05, 0.05)
+            tn.setCardDecal(True)
+            tnp = static_root.attachNewNode(tn)
+            if is_3d:
+                tnp.setPos(sc * CELL, -sr * CELL, 0.6)
+                tnp.setScale(0.25)
+                tnp.setBillboardPointEye()
+            else:
+                tnp.setPos(sc * CELL, -0.1, -sr * CELL + CELL * 0.35)
+                tnp.setScale(0.25)
+
+        if is_3d:
+            self._draw_grid_lines(static_root, rows, cols)
+
+        if self._use_gpu:
+            rbc.collect()
+            static_root.flattenStrong()
+
+        # 重建 Pod 节点
+        pod_root = self._app.render.attachNewNode("pods")
+        for pod in world_state.pod_state.pods.values():
+            pr, pc = pod.current_position
+            if is_3d:
+                np = _make_box("pod", CELL * 0.6, CELL * 0.6, CELL * 0.35)
+                np.reparentTo(pod_root)
+                np.setPos(pc * CELL, -pr * CELL, CELL * 0.175)
+                np.setColor(self._pal["pod"])
+                np.setTransparency(TransparencyAttrib.MAlpha)
+            else:
+                pod_cm = CardMaker("pod")
+                s = CELL * 0.35
+                pod_cm.setFrame(-s, s, -s, s)
+                np = pod_root.attachNewNode(pod_cm.generate())
+                np.setPos(pc * CELL, -0.2, -pr * CELL)
+                np.setColor(self._pal["pod"])
+                np.setTransparency(TransparencyAttrib.MAlpha)
+            self._pod_nodes[pod.pod_id] = np
+
+        # 重建 Agent 节点
+        agent_root = self._app.render.attachNewNode("agents")
+        for agent in world_state.agents:
+            clr = _ROBOT_COLOURS[agent.agent_id % len(_ROBOT_COLOURS)]
+            if is_3d:
+                gnp = _make_box("glow", CELL * 0.75, CELL * 0.75, CELL * 0.55)
+                gnp.reparentTo(agent_root)
+                gnp.setColor(clr[0], clr[1], clr[2], 0.2)
+                gnp.setTransparency(TransparencyAttrib.MAlpha)
+                gnp.hide()
+                self._glow_nodes[agent.agent_id] = gnp
+
+                anp = _make_box("agent", CELL * 0.55, CELL * 0.55, CELL * 0.45)
+                anp.reparentTo(agent_root)
+                anp.setColor(clr)
+                self._agent_nodes[agent.agent_id] = anp
+
+                tn = TextNode(f"agent_{agent.agent_id}")
+                tn.setText(str(agent.agent_id))
+                tn.setTextColor(1, 1, 1, 1)
+                tn.setAlign(TextNode.ACenter)
+                lnp = agent_root.attachNewNode(tn)
+                lnp.setScale(0.25)
+                lnp.setBillboardPointEye()
+                self._agent_labels[agent.agent_id] = lnp
+            else:
+                glow_cm = CardMaker("glow")
+                g = CELL * 0.55
+                glow_cm.setFrame(-g, g, -g, g)
+                gnp = agent_root.attachNewNode(glow_cm.generate())
+                gnp.setColor(clr[0], clr[1], clr[2], 0.25)
+                gnp.setTransparency(TransparencyAttrib.MAlpha)
+                gnp.hide()
+                self._glow_nodes[agent.agent_id] = gnp
+
+                agent_cm = CardMaker("agent")
+                a = CELL * 0.4
+                agent_cm.setFrame(-a, a, -a, a)
+                anp = agent_root.attachNewNode(agent_cm.generate())
+                anp.setColor(clr)
+                self._agent_nodes[agent.agent_id] = anp
+
+                tn = TextNode(f"agent_{agent.agent_id}")
+                tn.setText(str(agent.agent_id))
+                tn.setTextColor(1, 1, 1, 1)
+                tn.setAlign(TextNode.ACenter)
+                lnp = agent_root.attachNewNode(tn)
+                lnp.setScale(0.22)
+                self._agent_labels[agent.agent_id] = lnp
+
+        # 重建 HUD
+        self._hud_text = TextNode("hud")
+        self._hud_text.setTextColor(self._pal["text"])
+        self._hud_text.setAlign(TextNode.ALeft)
+        self._hud_text.setShadow(0.05, 0.05)
+        self._hud_text.setShadowColor(0, 0, 0, 0.8)
+        self._hud_np = self._app.aspect2d.attachNewNode(self._hud_text)
+        self._hud_np.setScale(0.05)
+        self._hud_np.setPos(-1.3, 0, 0.92)
+
     # ── initialisation ────────────────────────────────────────────────
 
     def _setup(self, world_state: "WorldState"):
@@ -907,6 +1082,10 @@ class MultiPanda3DReplayVisualizer:
         self._empty_drs: list = []
         self._focused_index: int | None = None
         self._on_click_callback = None  # callable(slot_index: int) | None
+        # 滚动支持
+        self._scroll_offset: int = 0  # 当前滚动偏移（行数）
+        self._total_rows: int = 0
+        self._grid_drs: list = []  # grid_rows * grid_cols display regions
 
     # ── public API ────────────────────────────────────────────────
 
@@ -919,6 +1098,8 @@ class MultiPanda3DReplayVisualizer:
         self._layout = layout
         grid_rows, grid_cols = layout
         n = len(datasets)
+        self._total_rows = math.ceil(n / grid_cols) if grid_cols > 0 else 1
+        self._scroll_offset = 0
 
         # ── ShowBase ──
         if self._parent_window_handle is not None:
@@ -953,10 +1134,54 @@ class MultiPanda3DReplayVisualizer:
         default_dr = self._app.win.getDisplayRegion(0)
         default_dr.setActive(False)
 
-        # ── Build per-slot display regions & scenes ──
+        # ── Build ALL slot scenes (for all N datasets) ──
+        for slot_idx in range(n):
+            data = datasets[slot_idx]
+            rw = replay_worlds[slot_idx]
+            label = labels[slot_idx]
+            ms = rw.map_state
+            rows, cols = ms.rows, ms.cols
+
+            scene_root = NodePath(f"scene_{slot_idx}")
+
+            half_w = cols * CELL / 2 + 1.0
+            half_h = rows * CELL / 2 + 1.0
+
+            lens = OrthographicLens()
+            lens.setFilmSize(half_w * 2, half_h * 2)
+            lens.setNearFar(-100, 100)
+
+            cam_node = Camera(f"cam_{slot_idx}")
+            cam_node.setLens(lens)
+            cam_np = scene_root.attachNewNode(cam_node)
+            cx = (cols - 1) * CELL / 2
+            cz = -((rows - 1) * CELL / 2)
+            cam_np.setPos(cx, -10, cz)
+            cam_np.lookAt(cx, 0, cz)
+
+            pod_nodes, agent_nodes, agent_labels, glow_nodes, title_np = \
+                self._build_slot_scene(scene_root, rw, label, rows, cols, ms)
+
+            slot = ReplaySlot(
+                index=slot_idx, label=label,
+                scene_root=scene_root, camera_np=cam_np,
+                display_region=None,
+                replay_world=rw, data=data,
+                pod_nodes=pod_nodes, agent_nodes=agent_nodes,
+                agent_labels=agent_labels, glow_nodes=glow_nodes,
+                title_np=title_np,
+            )
+            slot.film_w = half_w * 2
+            slot.film_h = half_h * 2
+            slot.original_film_w = half_w * 2
+            slot.original_film_h = half_h * 2
+            slot.original_cam_pos = (cx, -10, cz)
+            self._slots.append(slot)
+
+        # ── Create grid_rows * grid_cols display regions ──
+        self._grid_drs = []
         for i in range(grid_rows):
             for j in range(grid_cols):
-                slot_idx = i * grid_cols + j
                 col_w = 1.0 / grid_cols
                 row_h = 1.0 / grid_rows
                 left = j * col_w + self.DR_GAP
@@ -964,67 +1189,20 @@ class MultiPanda3DReplayVisualizer:
                 top = 1.0 - i * row_h - self.DR_GAP
                 bottom = 1.0 - (i + 1) * row_h + self.DR_GAP
 
-                if slot_idx >= n:
-                    # Empty slot — just a background DR
-                    dr = self._app.win.makeDisplayRegion(left, right, bottom, top)
-                    dr.setSort(10)
-                    dr.setClearColorActive(True)
-                    dr.setClearColor(self._pal["bg"])
-                    dr.setClearDepthActive(True)
-                    self._empty_drs.append(dr)
-                    continue
-
-                data = datasets[slot_idx]
-                rw = replay_worlds[slot_idx]
-                label = labels[slot_idx]
-                ms = rw.map_state
-                rows, cols = ms.rows, ms.cols
-
                 dr = self._app.win.makeDisplayRegion(left, right, bottom, top)
                 dr.setSort(10)
                 dr.setClearColorActive(True)
                 dr.setClearColor(self._pal["bg"])
                 dr.setClearDepthActive(True)
+                self._grid_drs.append({
+                    "dr": dr,
+                    "dims": (left, right, bottom, top),
+                    "grid_row": i,
+                    "grid_col": j,
+                })
 
-                # ── Scene root ──
-                scene_root = NodePath(f"scene_{i}_{j}")
-
-                # ── Camera ──
-                half_w = cols * CELL / 2 + 1.0
-                half_h = rows * CELL / 2 + 1.0
-
-                lens = OrthographicLens()
-                lens.setFilmSize(half_w * 2, half_h * 2)
-                lens.setNearFar(-100, 100)
-
-                cam_node = Camera(f"cam_{i}_{j}")
-                cam_node.setLens(lens)
-                cam_np = scene_root.attachNewNode(cam_node)
-                cx = (cols - 1) * CELL / 2
-                cz = -((rows - 1) * CELL / 2)
-                cam_np.setPos(cx, -10, cz)
-                cam_np.lookAt(cx, 0, cz)
-                dr.setCamera(cam_np)
-
-                # ── Build 2D scene ──
-                pod_nodes, agent_nodes, agent_labels, glow_nodes, title_np = \
-                    self._build_slot_scene(scene_root, rw, label, rows, cols, ms)
-
-                slot = ReplaySlot(
-                    index=slot_idx, label=label,
-                    scene_root=scene_root, camera_np=cam_np,
-                    display_region=dr, replay_world=rw, data=data,
-                    pod_nodes=pod_nodes, agent_nodes=agent_nodes,
-                    agent_labels=agent_labels, glow_nodes=glow_nodes,
-                    title_np=title_np,
-                )
-                slot.original_dr_dims = (left, right, bottom, top)
-                slot.film_w = half_w * 2
-                slot.film_h = half_h * 2
-                slot.original_film_w = half_w * 2
-                slot.original_film_h = half_h * 2
-                slot.original_cam_pos = (cx, -10, cz)
-                self._slots.append(slot)
+        # Assign initial cameras to display regions
+        self._apply_scroll()
 
         # ── 注册鼠标事件 ──
         self._app.accept('mouse1', self._on_mouse_click)
@@ -1039,10 +1217,70 @@ class MultiPanda3DReplayVisualizer:
 
         self._initialised = True
 
+    # ── scroll support ──────────────────────────────────────────
+
+    def _apply_scroll(self):
+        """根据 _scroll_offset 将 slot 相机分配给可见的 display regions。"""
+        from panda3d.core import Camera
+        grid_rows, grid_cols = self._layout
+        n = len(self._slots)
+
+        for dr_info in self._grid_drs:
+            dr = dr_info["dr"]
+            i = dr_info["grid_row"]
+            j = dr_info["grid_col"]
+            dataset_idx = (self._scroll_offset + i) * grid_cols + j
+
+            if 0 <= dataset_idx < n:
+                slot = self._slots[dataset_idx]
+                dr.setCamera(slot.camera_np)
+                dr.setActive(True)
+                slot.display_region = dr
+                slot.original_dr_dims = dr_info["dims"]
+                if slot.title_np:
+                    slot.title_np.show()
+            else:
+                dr.setActive(True)
+                dr.setClearColorActive(True)
+                dr.setClearColor(self._pal["bg"])
+                # 使用空相机使其只显示背景色
+                empty_scene = NodePath("empty")
+                lens = OrthographicLens()
+                lens.setFilmSize(2, 2)
+                lens.setNearFar(-1, 1)
+                cam_node = Camera("empty_cam")
+                cam_node.setLens(lens)
+                cam_np = empty_scene.attachNewNode(cam_node)
+                dr.setCamera(cam_np)
+
+    def scroll_to(self, row_offset: int):
+        """滚动到指定行偏移量。"""
+        grid_rows, _ = self._layout
+        max_offset = max(0, self._total_rows - grid_rows)
+        new_offset = max(0, min(max_offset, row_offset))
+        if new_offset == self._scroll_offset:
+            return
+        self._scroll_offset = new_offset
+        self._apply_scroll()
+
+    @property
+    def scroll_offset(self) -> int:
+        return self._scroll_offset
+
+    @property
+    def max_scroll_offset(self) -> int:
+        grid_rows, _ = self._layout
+        return max(0, self._total_rows - grid_rows)
+
     def update_all(self):
-        """Update every slot from its replay world state."""
-        for slot in self._slots:
-            self._update_slot(slot)
+        """Update visible slots from their replay world states."""
+        grid_rows, grid_cols = self._layout
+        n = len(self._slots)
+        for i in range(grid_rows):
+            for j in range(grid_cols):
+                dataset_idx = (self._scroll_offset + i) * grid_cols + j
+                if 0 <= dataset_idx < n:
+                    self._update_slot(self._slots[dataset_idx])
 
     def step(self):
         """Pump one Panda3D frame."""
@@ -1070,10 +1308,15 @@ class MultiPanda3DReplayVisualizer:
         if slot_h <= 0:
             return
         slot_aspect = slot_w / slot_h
-        for slot in self._slots:
-            slot.film_w = slot.film_h * slot_aspect
-            lens = slot.camera_np.node().getLens()
-            lens.setFilmSize(slot.film_w, slot.film_h)
+        n = len(self._slots)
+        for i in range(grid_rows):
+            for j in range(grid_cols):
+                dataset_idx = (self._scroll_offset + i) * grid_cols + j
+                if 0 <= dataset_idx < n:
+                    slot = self._slots[dataset_idx]
+                    slot.film_w = slot.film_h * slot_aspect
+                    lens = slot.camera_np.node().getLens()
+                    lens.setFilmSize(slot.film_w, slot.film_h)
 
     # ── focus / unfocus ─────────────────────────────────────────
 
@@ -1081,37 +1324,44 @@ class MultiPanda3DReplayVisualizer:
         """Expand one slot to fill the full window; hide all others."""
         self._focused_index = index
         gap = self.DR_GAP
-        for slot in self._slots:
-            if slot.index == index:
-                slot.display_region.setDimensions(gap, 1.0 - gap, gap, 1.0 - gap)
-                if slot.title_np:
-                    slot.title_np.hide()
-            else:
-                slot.display_region.setActive(False)
-        for dr in self._empty_drs:
-            dr.setActive(False)
+        slot = self._slots[index]
+
+        # 使用第一个 grid DR 来显示聚焦 slot
+        focus_dr = self._grid_drs[0]["dr"]
+        focus_dr.setDimensions(gap, 1.0 - gap, gap, 1.0 - gap)
+        focus_dr.setCamera(slot.camera_np)
+        focus_dr.setActive(True)
+        slot.display_region = focus_dr
+        if slot.title_np:
+            slot.title_np.hide()
+
+        # 隐藏其余所有 grid DRs
+        for dr_info in self._grid_drs[1:]:
+            dr_info["dr"].setActive(False)
 
     def unfocus(self):
         """Restore grid layout — all slots visible at original positions."""
         self._panning = False
         self._pan_mouse_prev = None
         self._focused_index = None
+
+        # 还原所有 slot 的缩放和平移
         for slot in self._slots:
-            # 还原缩放和平移
             slot.film_w = slot.original_film_w
             slot.film_h = slot.original_film_h
             lens = slot.camera_np.node().getLens()
             lens.setFilmSize(slot.film_w, slot.film_h)
             ox, oy, oz = slot.original_cam_pos
             slot.camera_np.setPos(ox, oy, oz)
-            if slot.original_dr_dims:
-                l, r, b, t = slot.original_dr_dims
-                slot.display_region.setDimensions(l, r, b, t)
-            slot.display_region.setActive(True)
-            if slot.title_np:
-                slot.title_np.show()
-        for dr in self._empty_drs:
-            dr.setActive(True)
+
+        # 恢复所有 grid DRs 到原始位置
+        for dr_info in self._grid_drs:
+            dr = dr_info["dr"]
+            l, r, b, t = dr_info["dims"]
+            dr.setDimensions(l, r, b, t)
+
+        # 重新应用滚动以分配正确的相机
+        self._apply_scroll()
 
     def _on_mouse_click(self):
         """Panda3D 鼠标点击处理：将点击位置映射到 slot 并调用回调。"""
@@ -1119,44 +1369,45 @@ class MultiPanda3DReplayVisualizer:
             return  # 聚焦模式下忽略点击
         if self._app is None or not self._app.mouseWatcherNode.hasMouse():
             return
-        # Panda3D mouseWatcher 坐标: x in [-1,1], y in [-1,1]
         mx = self._app.mouseWatcherNode.getMouseX()
         my = self._app.mouseWatcherNode.getMouseY()
-        # 转换为归一化窗口坐标 [0,1], (0,0)=左下, (1,1)=右上
         nx = (mx + 1.0) / 2.0
         ny = (my + 1.0) / 2.0
 
-        # 查找点击落在哪个 slot 的 display region 内
-        for slot in self._slots:
-            dims = slot.original_dr_dims
-            if dims is None:
-                continue
-            left, right, bottom, top = dims
+        grid_rows, grid_cols = self._layout
+        n = len(self._slots)
+        for dr_info in self._grid_drs:
+            left, right, bottom, top = dr_info["dims"]
             if left <= nx <= right and bottom <= ny <= top:
-                if self._on_click_callback is not None:
-                    self._on_click_callback(slot.index)
+                i = dr_info["grid_row"]
+                j = dr_info["grid_col"]
+                dataset_idx = (self._scroll_offset + i) * grid_cols + j
+                if 0 <= dataset_idx < n:
+                    if self._on_click_callback is not None:
+                        self._on_click_callback(dataset_idx)
                 return
 
     def _get_slot_under_mouse(self) -> "ReplaySlot | None":
         """返回鼠标所在的 slot，聚焦模式下直接返回聚焦 slot。"""
         if self._focused_index is not None:
-            for slot in self._slots:
-                if slot.index == self._focused_index:
-                    return slot
-            return None
+            return self._slots[self._focused_index]
         if self._app is None or not self._app.mouseWatcherNode.hasMouse():
             return None
         mx = self._app.mouseWatcherNode.getMouseX()
         my = self._app.mouseWatcherNode.getMouseY()
         nx = (mx + 1.0) / 2.0
         ny = (my + 1.0) / 2.0
-        for slot in self._slots:
-            dims = slot.original_dr_dims
-            if dims is None:
-                continue
-            left, right, bottom, top = dims
+        grid_rows, grid_cols = self._layout
+        n = len(self._slots)
+        for dr_info in self._grid_drs:
+            left, right, bottom, top = dr_info["dims"]
             if left <= nx <= right and bottom <= ny <= top:
-                return slot
+                i = dr_info["grid_row"]
+                j = dr_info["grid_col"]
+                dataset_idx = (self._scroll_offset + i) * grid_cols + j
+                if 0 <= dataset_idx < n:
+                    return self._slots[dataset_idx]
+                return None
         return None
 
     def _on_right_down(self):
@@ -1180,22 +1431,22 @@ class MultiPanda3DReplayVisualizer:
         if self._pan_mouse_prev is not None:
             dx = mx - self._pan_mouse_prev[0]
             dy = my - self._pan_mouse_prev[1]
-            for slot in self._slots:
-                if slot.index == self._focused_index:
-                    scale = slot.film_w * 0.5
-                    pos = slot.camera_np.getPos()
-                    slot.camera_np.setPos(
-                        pos.x - dx * scale,
-                        pos.y,
-                        pos.z - dy * scale,
-                    )
-                    break
+            slot = self._slots[self._focused_index]
+            scale = slot.film_w * 0.5
+            pos = slot.camera_np.getPos()
+            slot.camera_np.setPos(
+                pos.x - dx * scale,
+                pos.y,
+                pos.z - dy * scale,
+            )
         self._pan_mouse_prev = (mx, my)
         return task.cont
 
     def _on_zoom(self, direction: int):
-        """滚轮缩放：仅在聚焦模式下生效。"""
+        """滚轮：聚焦模式下缩放，网格模式下滚动。"""
         if self._focused_index is None:
+            # 网格模式：滚动切换行
+            self.scroll_to(self._scroll_offset + direction)
             return
         slot = self._get_slot_under_mouse()
         if slot is None:
@@ -1216,15 +1467,13 @@ class MultiPanda3DReplayVisualizer:
         """鼠标中键：仅在聚焦模式下还原缩放和平移。"""
         if self._focused_index is None:
             return
-        for slot in self._slots:
-            if slot.index == self._focused_index:
-                slot.film_w = slot.original_film_w
-                slot.film_h = slot.original_film_h
-                lens = slot.camera_np.node().getLens()
-                lens.setFilmSize(slot.film_w, slot.film_h)
-                ox, oy, oz = slot.original_cam_pos
-                slot.camera_np.setPos(ox, oy, oz)
-                return
+        slot = self._slots[self._focused_index]
+        slot.film_w = slot.original_film_w
+        slot.film_h = slot.original_film_h
+        lens = slot.camera_np.node().getLens()
+        lens.setFilmSize(slot.film_w, slot.film_h)
+        ox, oy, oz = slot.original_cam_pos
+        slot.camera_np.setPos(ox, oy, oz)
 
     # ── private helpers ──────────────────────────────────────────
 

@@ -159,6 +159,40 @@ col:  margin  [P][P]  4格过道  [P][P]  4格过道  [P][P] ...
 
 ---
 
+## 6. `replay` — 回放模式配置
+
+控制多轨迹回放时的显示模式和布局方式。仅在使用 `--replay` 参数加载多个轨迹文件时生效。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `mode` | `str` | `"window"` | 回放模式：`"window"` = Panda3D 网格窗口模式；`"list"` = 列表卡片模式 |
+| `layout` | `str` | `"auto"` | 网格布局：`"auto"` = 自动计算；或显式指定如 `"2x2"`、`"1x3"` |
+
+```json
+"replay": {
+    "mode": "window",
+    "layout": "auto"
+}
+```
+
+### 模式说明
+
+- **`"window"`（窗口模式）**：所有轨迹在同一窗口的 RxC 网格中独立渲染，支持鼠标滚轮滚动（当文件数超过布局容量时）。点击某个子窗口可进入聚焦查看模式。
+- **`"list"`（列表模式）**：以卡片列表形式展示所有轨迹的实时指标（当前帧、机器人状态分布、搬运 Pod 数等），点击卡片进入 Panda3D 聚焦视图。
+
+### 布局优先级
+
+当 `mode = "window"` 时，布局的确定优先级为：
+
+1. CLI 参数 `--replay-layout`（最高优先级）
+2. 配置文件中 `replay.layout` 的值
+3. 自动计算（`"auto"`）
+
+> **注意**：当文件数量超过布局格子数（如 6 个文件使用 `2x2` 布局），窗口模式会自动启用滚动功能，无需手动调整布局。
+> 单文件回放不受此配置影响，始终使用 `ReplayUI`。
+
+---
+
 ## 完整结构总览
 
 ```
@@ -188,11 +222,14 @@ default_config.json
 │   ├── fixed_order_size        # 固定订单大小开关
 │   ├── task_execution_mode     # 串/并行模式
 │   └── max_items_per_sku       # 每种 SKU 需求数量上限
-└── policies
-    ├── order_generator         # 订单生成算法（生成 SKU 需求）
-    ├── task_assigner           # 任务分配算法
-    ├── path_planner            # 路径规划算法
-    ├── pod_return_planner      # Pod 归还算法
-    ├── pod_initializer         # Pod 初始化算法
-    └── pod_retriever           # Pod 检索算法（SKU 需求 → Pod 列表）
+├── policies
+│   ├── order_generator         # 订单生成算法（生成 SKU 需求）
+│   ├── task_assigner           # 任务分配算法
+│   ├── path_planner            # 路径规划算法
+│   ├── pod_return_planner      # Pod 归还算法
+│   ├── pod_initializer         # Pod 初始化算法
+│   └── pod_retriever           # Pod 检索算法（SKU 需求 → Pod 列表）
+└── replay
+    ├── mode                    # 回放模式（window / list）
+    └── layout                  # 网格布局（auto / RxC）
 ```
