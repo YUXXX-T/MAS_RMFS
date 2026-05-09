@@ -482,7 +482,7 @@ python main.py --replay a.traj.json.gz b.traj.json.gz c.traj.json.gz --replay-la
 
 # 2x2 网格布局
 python main.py --replay f1.traj.json.gz f2.traj.json.gz f3.traj.json.gz f4.traj.json.gz --replay-layout 2x2
-& f:/Anaconda3/envs/multi_robot/python.exe f:/MAS_RMFS/main.py --replay .\TrajectoryRecord\test\Trajectory_first.json.gz .\TrajectoryRecord\test\Trajectory_second.json.gz .\TrajectoryRecord\test\Trajectory_third.json.gz .\TrajectoryRecord\test\Trajectory_fourth.json.gz --replay-fps 5
+& f:/Anaconda3/envs/multi_robot/python.exe f:/MAS_RMFS/main.py --replay .\TrajectoryRecord\test\Trajectory_first.json.gz .\TrajectoryRecord\test\Trajectory_second.json.gz .\TrajectoryRecord\test\Trajectory_third.json.gz .\TrajectoryRecord\test\Trajectory_fourth.json.gz .\TrajectoryRecord\test\Trajectory_fifth.json.gz .\TrajectoryRecord\test\Trajectory_sixth.json.gz .\TrajectoryRecord\test\Trajectory_seventh.json.gz .\TrajectoryRecord\test\Trajectory_eighth.json.gz .\TrajectoryRecord\test\Trajectory_ninth.json.gz .\TrajectoryRecord\test\Trajectory_tenth.json.gz --replay-fps 5
 
 ```
 
