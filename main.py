@@ -22,6 +22,70 @@ from Visualization.visualizer import TerminalVisualizer, MatplotlibVisualizer
 from Debug.logger import SimLogger
 
 
+def _run_benchmark(config, logger):
+    """Run MovingAI MAPF benchmark using config.benchmark settings."""
+    import random
+    from Benchmarks.movingai_loader import MovingAILoader
+    from Benchmarks.mapf_runner import MAPFRunner
+
+    bm = config.benchmark
+    if not bm.map_path:
+        logger.error("benchmark.map_path is required. Set it in the config JSON.")
+        sys.exit(1)
+
+    loader = MovingAILoader()
+    map_state = loader.load_map(bm.map_path)
+    logger.info(f"Loaded map: {bm.map_path} ({map_state.rows}x{map_state.cols})")
+
+    # Build agent start/goal list
+    if bm.scen_path:
+        scenarios = loader.load_scenario(bm.scen_path)
+        agents_with_goals = scenarios[:bm.num_agents]
+        logger.info(f"Loaded scenario: {bm.scen_path} ({len(agents_with_goals)} agents)")
+    else:
+        rng = random.Random(bm.random_seed)
+        free_cells = [
+            (r, c)
+            for r in range(map_state.rows)
+            for c in range(map_state.cols)
+            if map_state.is_walkable(r, c)
+        ]
+        if len(free_cells) < bm.num_agents * 2:
+            logger.error(
+                f"Not enough free cells ({len(free_cells)}) for "
+                f"{bm.num_agents} agents (need {bm.num_agents * 2} for start+goal)."
+            )
+            sys.exit(1)
+        sampled = rng.sample(free_cells, bm.num_agents * 2)
+        agents_with_goals = [
+            {"start": sampled[i], "goal": sampled[bm.num_agents + i]}
+            for i in range(bm.num_agents)
+        ]
+        logger.info(f"Generated {bm.num_agents} random agents (seed={bm.random_seed})")
+
+    # Instantiate path planner from policies config
+    pp_name, pp_params = config.policies.path_planner
+    PathPlannerCls = get_policy("path_planner", pp_name)
+    path_planner = PathPlannerCls(**pp_params)
+    logger.info(f"Path planner: {pp_name}")
+
+    # Run
+    runner = MAPFRunner(map_state, agents_with_goals, path_planner, max_ticks=bm.max_ticks)
+    result = runner.run()
+
+    # Print results
+    logger.info("=" * 60)
+    logger.info("MAPF BENCHMARK RESULTS")
+    logger.info(f"  Map:              {bm.map_path}")
+    logger.info(f"  Planner:          {pp_name}")
+    logger.info(f"  Agents:           {result['total_agents']}")
+    logger.info(f"  Completed:        {result['completed_agents']}/{result['total_agents']}")
+    logger.info(f"  Success rate:     {result['success_rate']:.2%}")
+    logger.info(f"  Makespan:         {result['makespan']} ticks")
+    logger.info(f"  Total conflicts:  {result['total_conflicts']}")
+    logger.info("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="MAS-RMFS：多智能体机器人移动履行系统仿真"
@@ -50,12 +114,23 @@ def main():
         help="启用 Panda3D 2D 正交可视化。",
     )
 
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="运行 MovingAI MAPF benchmark 模式（纯路径规划，无订单/Pod）。",
+    )
+
     args = parser.parse_args()
 
     # --- 加载配置 ---
     logger = SimLogger("Main")
     logger.info(f"Loading config from: {args.config}")
     config = load_config(args.config)
+
+    # --- Benchmark 模式 ---
+    if args.benchmark:
+        _run_benchmark(config, logger)
+        return
 
     # --- 从配置实例化策略 ---
     og_name, og_params = config.policies.order_generator

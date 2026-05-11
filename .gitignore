@@ -9,3 +9,7 @@ pod_initialization_prompt.md
 MAS_RMFS.7z
 claude_prompt_sku_refactoring.md
 demand.md
+
+# === 编译器/构建产物 (C++/CMake) ===
+# 忽略所有名为 build 的文件夹
+build/

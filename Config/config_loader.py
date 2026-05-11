@@ -82,6 +82,17 @@ class PolicyConfig:
 
 
 @dataclass
+class BenchmarkConfig:
+    """MAPF benchmark 模式配置。"""
+    enabled: bool = False
+    map_path: str = ""           # MovingAI .map 文件路径
+    scen_path: str = ""          # .scen 文件路径（空则随机生成 start/goal）
+    num_agents: int = 10         # agent 数量（scen 模式下取前 N 个）
+    max_ticks: int = 500         # 超时 tick 数
+    random_seed: int = 42        # 随机生成 start/goal 的种子
+
+
+@dataclass
 class RobotModelConfig:
     """3D 机器人模型参数。"""
     use_model: bool = True
@@ -132,6 +143,7 @@ class SimulationConfig:
     policies: PolicyConfig = field(default_factory=PolicyConfig)
     pods: PodsConfig = field(default_factory=PodsConfig)
     robot_model: RobotModelConfig = field(default_factory=RobotModelConfig)
+    benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
 
 
 def load_config(path: str) -> SimulationConfig:
@@ -255,8 +267,20 @@ def load_config(path: str) -> SimulationConfig:
         wheel_positions=[tuple(p) for p in rm_raw.get("wheel_positions", _default_wp)],
     )
 
+    # --- Parse benchmark config ---
+    bm_raw = raw.get("benchmark", {})
+    benchmark_config = BenchmarkConfig(
+        enabled=bm_raw.get("enabled", False),
+        map_path=bm_raw.get("map_path", ""),
+        scen_path=bm_raw.get("scen_path", ""),
+        num_agents=bm_raw.get("num_agents", 10),
+        max_ticks=bm_raw.get("max_ticks", 500),
+        random_seed=bm_raw.get("random_seed", 42),
+    )
+
     return SimulationConfig(
         map=map_config, robots=robot_config,
         simulation=sim_params, policies=policy_config,
         pods=pods_config, robot_model=robot_model_config,
+        benchmark=benchmark_config,
     )

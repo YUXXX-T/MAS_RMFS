@@ -14,6 +14,7 @@
 - [📦 已有算法列表](#-已有算法列表)
 - [📼 订单录制与回放](#-订单录制与回放)
 - [🎮 Panda3D 可视化](#-panda3d-可视化)
+- [🧪 MAPF Benchmark 模式](#-mapf-benchmark-模式)
 - [🧠 强化学习接口](#-强化学习接口)
 
 ---
@@ -490,6 +491,79 @@ list_policies(category=None)     # 列出已注册的算法
 | 算法名 | 说明 | 可配参数 |
 |--------|------|---------|
 | `DefaultPodInitializer` | 按 pod_types 和 SKU 池随机分配库存 | — |
+
+---
+
+## 🧪 MAPF Benchmark 模式
+
+系统内置 MovingAI 标准 MAPF 基准测试模式，可加载 `.map` / `.scen` 文件运行纯多智能体路径规划实验（无货架、无订单），用于与论文 baseline 直接对比。
+
+### 运行方式
+
+```bash
+# 使用 benchmark 专用配置
+python main.py --benchmark --config Config/benchmark_config.json
+
+# 也可在任意配置中添加 benchmark 段，用 --benchmark 启用
+python main.py --benchmark --config path/to/my_config.json
+```
+
+### 配置示例
+
+在 JSON 配置文件中添加 `benchmark` 段：
+
+```json
+{
+    "benchmark": {
+        "enabled": true,
+        "map_path": "Env/maps/warehouse-10-20-10-2-1.map",
+        "scen_path": "",
+        "num_agents": 20,
+        "max_ticks": 1000,
+        "random_seed": 42
+    },
+    "policies": {
+        "path_planner": {
+            "name": "AStarPathPlanner",
+            "params": {}
+        }
+    }
+}
+```
+
+路径规划器从 `policies.path_planner` 读取，可切换为任何已注册的 planner 进行对比实验。
+
+### Agent 生成方式
+
+| 方式 | 条件 | 说明 |
+|------|------|------|
+| **从 .scen 加载** | `scen_path` 非空 | 从 MovingAI .scen 文件读取 start/goal 坐标，取前 `num_agents` 个 |
+| **随机生成** | `scen_path` 为空 | 在地图 free cell 上随机采样 start/goal，使用 `random_seed` 保证可复现 |
+
+### 输出指标
+
+| 指标 | 说明 |
+|------|------|
+| `Completed` | 到达目标的 agent 数 / 总 agent 数 |
+| `Success rate` | 成功率 |
+| `Makespan` | 最后一个 agent 到达目标的 tick 数 |
+| `Total conflicts` | 仿真过程中检测到的顶点冲突与交换冲突总数 |
+
+### 可用地图
+
+`Env/maps/` 目录下包含 33 个标准 MovingAI 地图：
+
+| 类别 | 地图 |
+|------|------|
+| 空地 | `empty-8-8`, `empty-16-16`, `empty-32-32`, `empty-48-48` |
+| 随机障碍 | `random-32-32-10`, `random-32-32-20`, `random-64-64-10`, `random-64-64-20` |
+| 迷宫 | `maze-32-32-2`, `maze-32-32-4`, `maze-128-128-1`, `maze-128-128-2`, `maze-128-128-10` |
+| 房间 | `room-32-32-4`, `room-64-64-8`, `room-64-64-16` |
+| 仓库 | `warehouse-10-20-10-2-1`, `warehouse-10-20-10-2-2`, `warehouse-20-40-10-2-1`, `warehouse-20-40-10-2-2` |
+| 城市 | `Berlin_1_256`, `Boston_0_256`, `Paris_1_256` |
+| 游戏 | `brc202d`, `den312d`, `den520d`, `lak303d`, `orz900d`, `ost003d` 等 |
+
+> 完整的 benchmark 配置参数说明见 [`Config/benchmark_config_reference.md`](Config/benchmark_config_reference.md)。
 
 ---
 

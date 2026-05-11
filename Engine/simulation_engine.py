@@ -18,6 +18,7 @@ from Policies.OrderGenerator import BaseOrderGenerator
 from Policies.TaskAssigner import BaseTaskAssigner
 from Policies.PathPlanner import BasePathPlanner
 from Debug.logger import SimLogger
+from Metrics.tracker import MetricsTracker
 
 
 class SimulationEngine:
@@ -61,6 +62,7 @@ class SimulationEngine:
             level=config.simulation.log_level,
             log_file=config.simulation.log_file,
         )
+        self.metrics = MetricsTracker()
         self._running = True
 
     def run(self):
@@ -113,23 +115,27 @@ class SimulationEngine:
                 f"sku_demands={order.sku_demands} -> station {order.station_id}"
             )
 
-        # --- 步骤 2：分配任务 ---
+        # --- 步骤 2：分配任务（计时） ---
+        self.metrics.start_timer("assign")
         new_tasks = self.task_assigner.assign(self.world)
+        assign_ms = self.metrics.stop_timer("assign")
         for task in new_tasks:
             self.logger.debug(
                 f"[Tick {tick}] Task #{task.task_id} ({task.task_type.name}) "
                 f"assigned to Agent #{task.agent_id}"
             )
 
-        # --- Step 3: Plan paths & activate tasks ---
+        # --- Step 3: Plan paths & activate tasks（计时） ---
+        self.metrics.start_timer("plan")
         self._plan_and_activate(tick)
+        plan_ms = self.metrics.stop_timer("plan")
 
         # --- Step 4: Capture pre-move positions & Move agents ---
         prev_positions = {agent.agent_id: agent.position for agent in self.world.agents}
         self._move_agents(tick)
 
         # --- 步骤 5：检测冲突 (vertex & oncoming/swap) ---
-        self._detect_conflicts(tick, prev_positions)
+        vertex_conflicts = self._detect_conflicts(tick, prev_positions)
 
         # --- Step 6: Handle pickups, deliveries, returns ---
         self._handle_actions(tick)
@@ -137,7 +143,10 @@ class SimulationEngine:
         # --- 步骤 7：检查订单完成 ---
         self._check_order_completion(tick)
 
-        # --- 步骤 8：可视化（可选） ---
+        # --- 步骤 8：记录指标 ---
+        self.metrics.record(self.world, vertex_conflicts, assign_ms, plan_ms)
+
+        # --- 步骤 9：可视化（可选） ---
         if self.visualizer:
             self.visualizer.render(self.world)
 
@@ -204,7 +213,7 @@ class SimulationEngine:
                         f"[Tick {tick}] Agent #{agent.agent_id} moved to {new_pos}"
                     )
 
-    def _detect_conflicts(self, tick: int, prev_positions: dict):
+    def _detect_conflicts(self, tick: int, prev_positions: dict) -> int:
         """Detect vertex conflicts and oncoming (head-on swap) conflicts.
 
         参数
@@ -213,14 +222,21 @@ class SimulationEngine:
             当前仿真 tick。
         prev_positions : dict[int, tuple[int, int]]
             Mapping of agent_id -> position *before* this tick's movement.
+
+        返回
+        ----
+        int
+            Number of positions where vertex conflicts occurred.
         """
         # --- 顶点冲突s: two agents on the same cell ---
+        vertex_conflict_count = 0
         pos_to_agents: dict[tuple, list] = {}
         for agent in self.world.agents:
             pos_to_agents.setdefault(agent.position, []).append(agent.agent_id)
 
         for pos, agent_ids in pos_to_agents.items():
             if len(agent_ids) > 1:
+                vertex_conflict_count += 1
                 ids_str = ", ".join(f"#{aid}" for aid in agent_ids)
                 self.logger.warning(
                     f"[Tick {tick}] CONFLICT: Agents {ids_str} "
@@ -249,6 +265,8 @@ class SimulationEngine:
                         f"Agent #{b.agent_id} ({b_prev}->{b.position}) "
                         f"swapped positions (head-on collision)"
                     )
+
+        return vertex_conflict_count
 
     def _handle_actions(self, tick: int):
         """Handle pickup, delivery, and return actions with configurable delays."""
@@ -376,4 +394,16 @@ class SimulationEngine:
         pending = len(self.world.order_state.get_pending_orders())
         self.logger.info(f"  In-progress:      {in_progress}")
         self.logger.info(f"  Pending:          {pending}")
+
+        summary = self.metrics.summarize()
+        if summary:
+            self.logger.info("-" * 40)
+            self.logger.info("METRICS")
+            self.logger.info(f"  Throughput (final):          {summary['final_throughput']}")
+            self.logger.info(f"  Throughput (avg/100 ticks):  {summary['avg_throughput_per_100tick']:.2f}")
+            self.logger.info(f"  Deadlock events (ticks):     {summary['total_deadlock_events']}")
+            self.logger.info(f"  Congestion events (total):   {summary['total_congestion_events']}")
+            self.logger.info(f"  Avg planning time:           {summary['avg_plan_ms']:.2f} ms")
+            self.logger.info(f"  Avg assignment time:         {summary['avg_assign_ms']:.2f} ms")
+
         self.logger.info("=" * 60)
