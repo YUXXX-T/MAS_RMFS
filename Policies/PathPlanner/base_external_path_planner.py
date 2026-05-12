@@ -39,6 +39,7 @@ class BaseExternalSolverPlanner(BasePathPlanner):
         self._last_tick: int = -1
         self._goals: Dict[int, Tuple[int, int]] = {}
         self._cached_paths: Dict[int, List[Tuple[int, int]]] = {}
+        self._effective_seed: int = 0  # overwritten per-call by _run_solver
 
     # ------------------------------------------------------------------
     # Public interface
@@ -127,6 +128,11 @@ class BaseExternalSolverPlanner(BasePathPlanner):
             )
             output_fd, output_file = tempfile.mkstemp(suffix=".txt")
             os.close(output_fd)
+
+            # Per-tick effective seed: mix base seed with current tick so each
+            # solve is reproducible across runs but differs tick-to-tick.
+            base = getattr(self, "seed", 0)
+            self._effective_seed = (base * 1_000_003 + world_state.tick) & 0x7FFFFFFF
 
             cmd = self._build_command(
                 map_file, scen_file, len(agents_with_goals), output_file

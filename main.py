@@ -19,6 +19,7 @@ from Engine.simulation_engine import SimulationEngine
 import Policies  # noqa: F401 — 触发算法自动注册
 from Policies.policy_registry import get_policy
 from Visualization.visualizer import TerminalVisualizer, MatplotlibVisualizer
+from Metrics import SnapshotCollector
 from Debug.logger import SimLogger
 
 
@@ -66,12 +67,53 @@ def _run_benchmark(config, logger):
     # Instantiate path planner from policies config
     pp_name, pp_params = config.policies.path_planner
     PathPlannerCls = get_policy("path_planner", pp_name)
+    if (config.simulation.seed is not None
+            and "seed" not in pp_params
+            and "seed" in __import__("inspect").signature(PathPlannerCls).parameters):
+        pp_params = {**pp_params, "seed": config.simulation.seed}
     path_planner = PathPlannerCls(**pp_params)
     logger.info(f"Path planner: {pp_name}")
 
     # Run
     runner = MAPFRunner(map_state, agents_with_goals, path_planner, max_ticks=bm.max_ticks)
+
+    snapshot_collector = None
+    if config.snapshot.enabled:
+        map_label = os.path.splitext(os.path.basename(bm.map_path))[0]
+        episode_id = SnapshotCollector.resolve_episode_id(
+            config.snapshot.episode_id,
+            {
+                "map": map_label,
+                "planner": pp_name,
+                "assigner": "none",
+                "robots": str(bm.num_agents),
+                "agents": str(bm.num_agents),
+            },
+        )
+        snapshot_collector = SnapshotCollector(
+            output_dir=config.snapshot.output_dir,
+            agent_goals_override=runner.goals,
+        )
+        snapshot_collector.start_episode(episode_id)
+        snapshot_collector.write_header(
+            runner.world,
+            extra={
+                "mode": "mapf_benchmark",
+                "map_path": bm.map_path,
+                "scen_path": bm.scen_path,
+                "planner": {"name": pp_name, "params": pp_params},
+                "num_agents": bm.num_agents,
+                "max_ticks": bm.max_ticks,
+                "random_seed": bm.random_seed,
+            },
+        )
+        runner.snapshot_collector = snapshot_collector
+        logger.info(f"Snapshot collection enabled → {config.snapshot.output_dir}/{episode_id}.jsonl")
+
     result = runner.run()
+
+    if snapshot_collector is not None:
+        snapshot_collector.end_episode()
 
     # Print results
     logger.info("=" * 60)
@@ -127,6 +169,15 @@ def main():
     logger.info(f"Loading config from: {args.config}")
     config = load_config(args.config)
 
+    # --- 全局随机种子（影响 ZipfOrderGenerator / RandomOrderGenerator /
+    #     DefaultPodInitializer / benchmark 随机 start-goal 等所有用 random.* / np.random.* 的模块）---
+    if config.simulation.seed is not None:
+        import random as _random
+        import numpy as _np
+        _random.seed(config.simulation.seed)
+        _np.random.seed(config.simulation.seed)
+        logger.info(f"Global seed set: {config.simulation.seed}")
+
     # --- Benchmark 模式 ---
     if args.benchmark:
         _run_benchmark(config, logger)
@@ -171,6 +222,11 @@ def main():
         **og_params,
     )
     task_assigner = TaskAssignerCls(**ta_params)
+    # 如果 planner 构造函数接受 `seed` 且配置里没显式给，注入全局 seed
+    if (config.simulation.seed is not None
+            and "seed" not in pp_params
+            and "seed" in __import__("inspect").signature(PathPlannerCls).parameters):
+        pp_params = {**pp_params, "seed": config.simulation.seed}
     path_planner = PathPlannerCls(**pp_params)
     pod_return_planner = PodReturnPlannerCls(**rp_params)
     pod_retriever = PodRetrieverCls(**pr_params)
@@ -207,18 +263,55 @@ def main():
         visualizer=visualizer,
     )
 
-    # --- 运行 ---
-    if args.p3d and visualizer is not None:
-        # Qt UI 驱动循环（替代 engine.run）
-        from Visualization.ui import SimulationUI
-        ui = SimulationUI(
-            engine=engine,
-            visualizer=visualizer,
-            night_mode=config.simulation.night_mode,
+    # --- 快照采集（可选） ---
+    snapshot_collector = None
+    if config.snapshot.enabled:
+        episode_id = SnapshotCollector.resolve_episode_id(
+            config.snapshot.episode_id,
+            {
+                "map": f"{config.map.rows}x{config.map.cols}",
+                "planner": pp_name,
+                "assigner": ta_name,
+                "robots": str(config.robots.num_robots),
+            },
         )
-        ui.run()
-    else:
-        engine.run()
+        snapshot_collector = SnapshotCollector(output_dir=config.snapshot.output_dir)
+        engine.on_tick_callbacks.append(snapshot_collector.on_tick)
+        snapshot_collector.start_episode(episode_id)
+        snapshot_collector.write_header(
+            engine.world,
+            extra={
+                "mode": "rmfs",
+                "planner": {"name": pp_name, "params": pp_params},
+                "task_assigner": {"name": ta_name, "params": ta_params},
+                "order_generator": {"name": og_name, "params": og_params},
+                "pod_return_planner": rp_name,
+                "pod_retriever": pr_name,
+                "num_robots": config.robots.num_robots,
+                "order_interval": config.simulation.order_interval,
+                "max_items_per_order": config.simulation.max_items_per_order,
+                "use_recorded_orders": config.simulation.use_recorded_orders,
+                "task_execution_mode": config.simulation.task_execution_mode,
+            },
+        )
+        logger.info(f"Snapshot collection enabled → {config.snapshot.output_dir}/{episode_id}.jsonl")
+
+    # --- 运行 ---
+    try:
+        if args.p3d and visualizer is not None:
+            # Qt UI 驱动循环（替代 engine.run）
+            from Visualization.ui import SimulationUI
+            ui = SimulationUI(
+                engine=engine,
+                visualizer=visualizer,
+                night_mode=config.simulation.night_mode,
+            )
+            ui.run()
+        else:
+            engine.run()
+    finally:
+        if snapshot_collector is not None:
+            snapshot_collector.end_episode()
 
 
 if __name__ == "__main__":

@@ -47,6 +47,7 @@ class RobotConfig:
     num_robots: int
     starts: List[Tuple[int, int]]
     speed: int = 1
+    random_starts: bool = False    # True = 忽略 starts，运行时从 free cell 中按全局 seed 采样
 
 
 @dataclass
@@ -93,6 +94,14 @@ class BenchmarkConfig:
 
 
 @dataclass
+class SnapshotConfig:
+    """训练数据快照采集配置。"""
+    enabled: bool = False
+    output_dir: str = "DataGen/snapshots"
+    episode_id: str = "{map}_{planner}_{assigner}_r{robots}"
+
+
+@dataclass
 class RobotModelConfig:
     """3D 机器人模型参数。"""
     use_model: bool = True
@@ -132,6 +141,8 @@ class SimulationParams:
     use_recorded_orders: bool = False  # True = 从文件读取预录制订单
     recorded_orders_path: str = ""    # 预录制订单 JSON 文件路径
     immediate_dispatch: bool = False  # True = 忽略录制 tick，立即投放所有订单（强制 serial 模式）
+    seed: Optional[int] = None        # 全局随机种子；None = 不 seed（每次跑结果不同）
+    max_ticks: int = 0                # 引擎自动停机的 tick 上限；0 = 不限（仅响应 Ctrl+C / 外部信号）
 
 
 @dataclass
@@ -144,6 +155,7 @@ class SimulationConfig:
     pods: PodsConfig = field(default_factory=PodsConfig)
     robot_model: RobotModelConfig = field(default_factory=RobotModelConfig)
     benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
+    snapshot: SnapshotConfig = field(default_factory=SnapshotConfig)
 
 
 def load_config(path: str) -> SimulationConfig:
@@ -194,6 +206,7 @@ def load_config(path: str) -> SimulationConfig:
         num_robots=robot_raw.get("num_robots", len(starts)),
         starts=starts,
         speed=robot_raw.get("speed", 1),
+        random_starts=robot_raw.get("random_starts", False),
     )
 
     # --- Parse simulation params ---
@@ -219,6 +232,8 @@ def load_config(path: str) -> SimulationConfig:
         use_recorded_orders=sim_raw.get("use_recorded_orders", False),
         recorded_orders_path=sim_raw.get("recorded_orders_path", ""),
         immediate_dispatch=sim_raw.get("immediate_dispatch", False),
+        seed=sim_raw.get("seed", None),
+        max_ticks=sim_raw.get("max_ticks", 0),
     )
 
     # --- Parse policies ---
@@ -278,9 +293,17 @@ def load_config(path: str) -> SimulationConfig:
         random_seed=bm_raw.get("random_seed", 42),
     )
 
+    # --- Parse snapshot config ---
+    snap_raw = raw.get("snapshot", {})
+    snapshot_config = SnapshotConfig(
+        enabled=snap_raw.get("enabled", False),
+        output_dir=snap_raw.get("output_dir", "DataGen/snapshots"),
+        episode_id=snap_raw.get("episode_id", "{map}_{planner}_{assigner}_r{robots}"),
+    )
+
     return SimulationConfig(
         map=map_config, robots=robot_config,
         simulation=sim_params, policies=policy_config,
         pods=pods_config, robot_model=robot_model_config,
-        benchmark=benchmark_config,
+        benchmark=benchmark_config, snapshot=snapshot_config,
     )

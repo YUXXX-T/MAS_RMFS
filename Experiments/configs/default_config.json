@@ -77,25 +77,9 @@
         ]
     },
     "robots": {
-        "num_robots": 4,
-        "starts": [
-            [
-                0,
-                0
-            ],
-            [
-                0,
-                1
-            ],
-            [
-                0,
-                2
-            ],
-            [
-                19,
-                2
-            ]
-        ],
+        "num_robots": 16,
+        "random_starts": true,
+        "starts": [],
         "speed": 1
     },
     "pods": {
@@ -137,13 +121,10 @@
                 "zipf_param": 1.5
             }
         },
-        "task_assigner": "GreedyTaskAssigner",
+        "task_assigner": "HungarianTaskAssigner",
         "path_planner": {
-            "name": "PrioritizedPathPlanner",
-            "params": {
-                "max_horizon": 100,
-                "goal_reserve": 6
-            }
+            "name": "LNS2Planner",
+            "params": {}
         },
         "pod_return_planner": "HomeReturnPlanner",
         "pod_initializer": "DefaultPodInitializer",
@@ -155,7 +136,7 @@
         "episode_id": "{map}_{planner}_{assigner}_r{robots}"
     },
     "robot_model": {
-        "use_model": true,
+        "use_model": false,
         "body_offset_z": 0.008,
         "body_hpr": [90, 90, 90],
         "wheel_radius": 0.08,

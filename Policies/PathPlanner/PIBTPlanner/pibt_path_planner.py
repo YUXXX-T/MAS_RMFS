@@ -81,12 +81,13 @@ class PIBTPlanner(BasePathPlanner):
     带有优先级继承、回溯和动态优先级老化的每步 PIBT 规划器。
     """
 
-    def __init__(self):
+    def __init__(self, seed: int = 0):
         self._last_tick: int = -1
         self._goals: Dict[int, Tuple[int, int]] = {}
         self._priorities: Dict[int, int] = {}
         self._arrived: Dict[int, Tuple[int, int]] = {}
-        self._rng = random.Random(0)
+        self._base_seed = seed
+        self._rng = random.Random(seed)
 
         # BFS distance caches: goal -> {cell -> distance}
         # _dist_cache: ignoring pods (for non-carrying agents)
@@ -166,7 +167,9 @@ class PIBTPlanner(BasePathPlanner):
     # ------------------------------------------------------------------
 
     def _run_bulk_pibt(self, world_state: "WorldState") -> None:
-        self._rng.seed(world_state.tick)
+        # Mix base_seed with tick so behavior varies per tick but is
+        # reproducible across runs with the same configured seed.
+        self._rng.seed((self._base_seed, world_state.tick))
         self._init_tick(world_state)
 
         # Process undecided agents in priority order (highest first)

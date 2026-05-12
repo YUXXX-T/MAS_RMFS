@@ -45,11 +45,15 @@ MAS_RMFS/
 │   │   └── RecordedOrderGenerator/  # 回放预录制订单
 │   ├── PathPlanner/              # 路径规划器
 │   │   ├── base_path_planner.py
+│   │   ├── base_external_path_planner.py  # 外部求解器基类（定义 plan_batch）
 │   │   ├── AStarPathPlanner/
-│   │   └── PrioritizedPathPlanner/
+│   │   ├── PrioritizedPathPlanner/
+│   │   ├── PIBTPlanner/
+│   │   └── ExternalSolverPlanner/   # C++ MAPF 求解器（EECBS/LNS2/LaCAM2）
 │   ├── TaskAssigner/             # 任务分配器
 │   │   ├── base_task_assigner.py
-│   │   └── GreedyTaskAssigner/
+│   │   ├── GreedyTaskAssigner/
+│   │   └── HungarianTaskAssigner/   # 匈牙利算法全局最优分配
 │   ├── PodRetriever/             # SKU → Pod 检索器
 │   │   ├── base_pod_retriever.py
 │   │   └── DefaultPodRetriever/
@@ -273,8 +277,10 @@ python main.py --p3d
     ┌────────────────▼────────────────────┐
     │  Step 3: 路径规划与任务激活           │
     │  _plan_and_activate(tick)            │
-    │  → 对每个有任务但无路径的智能体调用    │
-    │    PathPlanner.plan(agent, goal, world)│
+    │  → 收集所有有任务但无路径的智能体      │
+    │  → 若规划器有 plan_batch：            │
+    │    批量调用 plan_batch(agents, world) │
+    │  → 否则逐个调用 plan(agent, goal)     │
     │  → 跳过等待中(is_waiting)的智能体     │
     └────────────────┬────────────────────┘
                      │
@@ -432,6 +438,7 @@ register("path_planner", "MyNewPlanner", MyNewPlanner)  # ← 新增
 | 🛢️ 订单生成器 | `BaseOrderGenerator` | `generate()` | `generate(world_state) → list[Order]` |
 | 📋 任务分配器 | `BaseTaskAssigner` | `assign()` | `assign(world_state) → list[Task]` |
 | 🗺️ 路径规划器 | `BasePathPlanner` | `plan()` | `plan(agent, goal, world_state) → list[tuple]` |
+| 🗺️ 批量路径规划器 | `BaseExternalSolverPlanner` | `plan_batch()` | `plan_batch(agents_with_goals, world_state) → dict[agent_id, list[tuple]]` |
 | 📦 货架归还规划器 | `BasePodReturnPlanner` | `plan_return()` | `plan_return(pod, station_pos, world_state) → tuple` |
 | 🔍 SKU→Pod 检索器 | `BasePodRetriever` | `retrieve()` | `retrieve(sku, world_state) → Pod` |
 | 🏭 货架初始化器 | `BasePodInitializer` | `initialize()` | `initialize(pods, config) → None` |
@@ -462,16 +469,23 @@ list_policies(category=None)     # 列出已注册的算法
 
 ### 🗺️ 路径规划器（PathPlanner）
 
-| 算法名 | 说明 | 可配参数 |
-|--------|------|---------|
-| `AStarPathPlanner` | 单智能体 A* 算法 | — |
-| `PrioritizedPathPlanner` | 优先级规划（时空 A* + 预留表） | `max_horizon`（搜索深度，默认 100）, `goal_reserve`（目标占用缓冲，默认 10） |
+| 算法名 | 说明 | `plan_batch` | 可配参数 |
+|--------|------|:----------:|---------|
+| `AStarPathPlanner` | 单智能体 A* 算法 | — | — |
+| `PrioritizedPathPlanner` | 优先级规划（时空 A* + 预留表） | — | `max_horizon`（搜索深度，默认 100）, `goal_reserve`（目标占用缓冲，默认 10） |
+| `EECBSPlanner` | EECBS 最优 MAPF 求解器（C++ 外部求解器） | ✅ | `time_limit`（求解时限，默认 60s） |
+| `LNS2Planner` | LNS2 大邻域搜索 MAPF 求解器（C++ 外部求解器） | ✅ | `time_limit`（求解时限，默认 60s） |
+| `LaCAM2Planner` | LaCAM2 快速次优 MAPF 求解器（C++ 外部求解器） | ✅ | `time_limit`（求解时限，默认 60s） |
+| `PIBTPlanner` | PIBT 实时 MAPF 规划器 | — | — |
+
+> **`plan_batch` 说明**：标记 ✅ 的规划器实现了 `plan_batch(agents_with_goals, world_state)` 接口，引擎会自动检测并调用。该接口将所有需要规划的 agent 一次性发给求解器，由求解器统一协调生成全局无冲突路径。未实现 `plan_batch` 的规划器由引擎逐个调用 `plan()` 方法。
 
 ### 📋 任务分配器（TaskAssigner）
 
 | 算法名 | 说明 | 可配参数 |
 |--------|------|---------|
 | `GreedyTaskAssigner` | 贪心分配：按距离选择最近的空闲智能体 | — |
+| `HungarianTaskAssigner` | 匈牙利算法全局最优分配，最小化 agent→pod 总曼哈顿距离 | — |
 
 ### 📦 货架归还规划器（PodReturnPlanner）
 

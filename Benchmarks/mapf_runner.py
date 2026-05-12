@@ -67,6 +67,7 @@ class MAPFRunner:
             self.goals[i] = ag["goal"]
 
         self.world = _build_minimal_world(map_state, self.agents)
+        self.snapshot_collector = None
 
     def run(self) -> dict:
         """Execute the MAPF instance and return result metrics."""
@@ -98,6 +99,9 @@ class MAPFRunner:
                     agent.advance()
 
             total_conflicts += self._count_conflicts(prev_positions)
+
+            if self.snapshot_collector is not None:
+                self.snapshot_collector.record_tick(self.world)
 
             tick += 1
             self.world.tick = tick

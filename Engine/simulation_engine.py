@@ -63,7 +63,13 @@ class SimulationEngine:
             log_file=config.simulation.log_file,
         )
         self.metrics = MetricsTracker()
+        self.on_tick_callbacks: list = []
         self._running = True
+
+        # Conflict details from the most recent tick — populated by
+        # _detect_conflicts so callbacks (e.g. SnapshotCollector) can serialize them.
+        self.last_vertex_conflicts: list[tuple] = []   # [((r,c), [agent_ids...]), ...]
+        self.last_swap_conflicts: list[tuple] = []     # [((r1,c1), (r2,c2), aid_a, aid_b), ...]
 
     def run(self):
         """
@@ -71,14 +77,17 @@ class SimulationEngine:
 
         Press Ctrl+C to stop gracefully.
         """
-        # 注册信号处理器以优雅停机
-        original_handler = signal.getsignal(signal.SIGINT)
+        # 注册信号处理器以优雅停机（SIGINT=Ctrl+C, SIGTERM=`timeout` / `kill`）
+        original_int = signal.getsignal(signal.SIGINT)
+        original_term = signal.getsignal(signal.SIGTERM)
 
         def _shutdown(signum, frame):
-            self.logger.info("Shutdown signal received. Finishing current tick...")
+            sig_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
+            self.logger.info(f"{sig_name} received. Finishing current tick...")
             self._running = False
 
         signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
 
         self.logger.info("=" * 60)
         self.logger.info("MAS-RMFS Simulation Started")
@@ -92,6 +101,13 @@ class SimulationEngine:
         try:
             while self._running:
                 self._tick()
+                max_ticks = self.config.simulation.max_ticks
+                if max_ticks and self.world.tick >= max_ticks:
+                    self.logger.info(
+                        f"Reached max_ticks={max_ticks}; stopping."
+                    )
+                    self._running = False
+                    break
                 if self.config.simulation.tick_delay > 0:
                     import time
                     time.sleep(self.config.simulation.tick_delay)
@@ -100,7 +116,8 @@ class SimulationEngine:
             raise
         finally:
             self._print_summary()
-            signal.signal(signal.SIGINT, original_handler)
+            signal.signal(signal.SIGINT, original_int)
+            signal.signal(signal.SIGTERM, original_term)
 
     def _tick(self):
         """Execute one simulation tick."""
@@ -146,6 +163,10 @@ class SimulationEngine:
         # --- 步骤 8：记录指标 ---
         self.metrics.record(self.world, vertex_conflicts, assign_ms, plan_ms)
 
+        # --- 步骤 8.5：tick 回调（快照采集等） ---
+        for cb in self.on_tick_callbacks:
+            cb(self)
+
         # --- 步骤 9：可视化（可选） ---
         if self.visualizer:
             self.visualizer.render(self.world)
@@ -155,21 +176,21 @@ class SimulationEngine:
 
     def _plan_and_activate(self, tick: int):
         """Plan paths for agents that have assigned tasks but no active path."""
+
+        # --- Phase 1: activate tasks for agents that need them ---
+        agents_need_plan = []
         for agent in self.world.agents:
             if agent.is_idle or agent.is_waiting:
                 continue
 
-            # If agent has no path and no active task, find next assigned task
             active_task = self.world.task_state.get_active_task_for_agent(agent.agent_id)
             if active_task is None:
                 next_task = self.world.task_state.get_next_task_for_agent(agent.agent_id)
                 if next_task is None:
                     continue
-                # Activate this task
                 next_task.status = TaskStatus.IN_PROGRESS
                 active_task = next_task
 
-                # Update agent status based on task type
                 if active_task.task_type == TaskType.PICK:
                     agent.status = AgentStatus.MOVING_TO_POD
                 elif active_task.task_type == TaskType.DELIVER:
@@ -179,21 +200,41 @@ class SimulationEngine:
 
                 agent.assigned_task_id = active_task.task_id
 
-            # Plan path if agent doesn't have one
             if not agent.has_path:
-                path = self.path_planner.plan(
-                    agent, active_task.destination, self.world
-                )
+                agents_need_plan.append((agent, active_task.destination))
+
+        if not agents_need_plan:
+            return
+
+        # --- Phase 2: plan paths (batch or individual) ---
+        if hasattr(self.path_planner, "plan_batch"):
+            paths = self.path_planner.plan_batch(agents_need_plan, self.world)
+            for agent, goal in agents_need_plan:
+                path = paths.get(agent.agent_id)
                 if path:
                     agent.assign_path(path)
                     self.logger.debug(
                         f"[Tick {tick}] Agent #{agent.agent_id} planned path "
-                        f"to {active_task.destination} ({len(path)} steps)"
+                        f"to {goal} ({len(path)} steps)"
                     )
                 else:
                     self.logger.warning(
                         f"[Tick {tick}] Agent #{agent.agent_id} could not find "
-                        f"path to {active_task.destination}"
+                        f"path to {goal}"
+                    )
+        else:
+            for agent, goal in agents_need_plan:
+                path = self.path_planner.plan(agent, goal, self.world)
+                if path:
+                    agent.assign_path(path)
+                    self.logger.debug(
+                        f"[Tick {tick}] Agent #{agent.agent_id} planned path "
+                        f"to {goal} ({len(path)} steps)"
+                    )
+                else:
+                    self.logger.warning(
+                        f"[Tick {tick}] Agent #{agent.agent_id} could not find "
+                        f"path to {goal}"
                     )
 
     def _move_agents(self, tick: int):
@@ -230,6 +271,8 @@ class SimulationEngine:
         """
         # --- 顶点冲突s: two agents on the same cell ---
         vertex_conflict_count = 0
+        self.last_vertex_conflicts = []
+        self.last_swap_conflicts = []
         pos_to_agents: dict[tuple, list] = {}
         for agent in self.world.agents:
             pos_to_agents.setdefault(agent.position, []).append(agent.agent_id)
@@ -237,6 +280,7 @@ class SimulationEngine:
         for pos, agent_ids in pos_to_agents.items():
             if len(agent_ids) > 1:
                 vertex_conflict_count += 1
+                self.last_vertex_conflicts.append((pos, list(agent_ids)))
                 ids_str = ", ".join(f"#{aid}" for aid in agent_ids)
                 self.logger.warning(
                     f"[Tick {tick}] CONFLICT: Agents {ids_str} "
@@ -259,6 +303,9 @@ class SimulationEngine:
                     and b.position == a_prev
                     and a_prev != a.position  # A actually moved
                 ):
+                    self.last_swap_conflicts.append(
+                        (a_prev, b_prev, a.agent_id, b.agent_id)
+                    )
                     self.logger.warning(
                         f"[Tick {tick}] ONCOMING CONFLICT: "
                         f"Agent #{a.agent_id} ({a_prev}->{a.position}) and "

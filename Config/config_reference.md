@@ -89,7 +89,19 @@
 
 ---
 
-## 5. `policies` — 策略选择配置
+## 5. `snapshot` — 训练数据快照采集配置
+
+控制是否在仿真过程中采集每 tick 的状态快照（JSONL 格式），用于 Phase 3 世界模型训练数据。RMFS 模式和 MovingAI benchmark 模式均支持。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enabled` | `bool` | `false` | 是否启用快照采集 |
+| `output_dir` | `str` | `"DataGen/snapshots"` | 快照输出目录，每个 episode 生成一个 `.jsonl` 文件 |
+| `episode_id` | `str` | `"{map}_{planner}_{assigner}_r{robots}"` | 文件名模板，支持变量替换：`{map}` 地图标识、`{planner}` 路径规划器、`{assigner}` 任务分配器、`{robots}`/`{agents}` 机器人数、`{timestamp}` 时间戳 |
+
+---
+
+## 6. `policies` — 策略选择配置
 
 指定各模块使用的算法实现。每个字段可以是：
 - **字符串**：仅指定算法名称（无额外参数）
@@ -109,7 +121,7 @@
 | 策略类别 | 可用实现 | 额外参数 |
 |---------|---------|---------|
 | `order_generator` | `RandomOrderGenerator`, `ZipfOrderGenerator` | `ZipfOrderGenerator`: `zipf_param`（Zipf 指数，越大越偏向热门 SKU） |
-| `task_assigner` | `GreedyTaskAssigner` | — |
+| `task_assigner` | `GreedyTaskAssigner`, `HungarianTaskAssigner` | `HungarianTaskAssigner`: 无额外参数。基于匈牙利算法全局最优分配，最小化 agent→pod 总曼哈顿距离 |
 | `path_planner` | `AStarPathPlanner`, `PrioritizedPathPlanner` | `PrioritizedPathPlanner`: `max_horizon`（搜索步数上限）, `goal_reserve`（目标保留 tick 数） |
 | `pod_return_planner` | `HomeReturnPlanner` | — |
 | `pod_initializer` | `DefaultPodInitializer` | — |
@@ -135,6 +147,10 @@ default_config.json
 │   ├── skus_per_pod            # 每 Pod SKU 种类数
 │   ├── sku_pool_size_per_type  # 每类型 SKU 池大小
 │   └── items_per_sku           # 每种 SKU 初始物品数量
+├── snapshot
+│   ├── enabled                 # 是否启用快照采集
+│   ├── output_dir              # 快照输出目录
+│   └── episode_id              # 文件名模板 (支持 {map},{planner},{assigner},{robots},{timestamp})
 ├── simulation
 │   ├── order_interval          # 订单生成间隔
 │   ├── max_items_per_order     # 订单最大 SKU 种类数

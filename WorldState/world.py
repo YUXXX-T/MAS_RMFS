@@ -45,9 +45,9 @@ class WorldState:
 
         # 在起始位置初始化智能体
         self.agents: List[AgentState] = []
+        starts = self._resolve_agent_starts(config)
         for i in range(config.robots.num_robots):
-            start = config.robots.starts[i] if i < len(config.robots.starts) else (0, 0)
-            self.agents.append(AgentState(agent_id=i, start_position=start))
+            self.agents.append(AgentState(agent_id=i, start_position=starts[i]))
 
         # 初始化订单和任务容器
         self.order_state = OrderState()
@@ -61,6 +61,40 @@ class WorldState:
         PodInitializerCls = get_policy("pod_initializer", pi_name)
         pod_initializer = PodInitializerCls(**pi_params)
         pod_initializer.initialize_pods(self)
+
+    def _resolve_agent_starts(self, config):
+        """Return a list of agent start positions of length num_robots.
+
+        Two modes:
+        - random_starts=False (default): use config.robots.starts in order;
+          pad with (0, 0) for any agent beyond the list (legacy behavior).
+        - random_starts=True: sample positions from FREE walkable cells
+          (excluding stations and pod homes), using the GLOBAL random module —
+          so seeding ``random`` upstream gives reproducible starts.
+        """
+        import random as _random
+        from WorldState.map_state import CellType
+
+        n = config.robots.num_robots
+        if not config.robots.random_starts:
+            starts = list(config.robots.starts)
+            if len(starts) < n:
+                starts.extend([(0, 0)] * (n - len(starts)))
+            return starts[:n]
+
+        m = self.map_state
+        free_cells = [
+            (r, c)
+            for r in range(m.rows)
+            for c in range(m.cols)
+            if m.grid[r][c] == CellType.FREE
+        ]
+        if len(free_cells) < n:
+            raise ValueError(
+                f"random_starts=True but only {len(free_cells)} free cells "
+                f"available for {n} robots."
+            )
+        return _random.sample(free_cells, n)
 
     def advance_tick(self):
         """递增仿真 tick 计数器。"""
