@@ -169,7 +169,7 @@ class PIBTPlanner(BasePathPlanner):
     def _run_bulk_pibt(self, world_state: "WorldState") -> None:
         # Mix base_seed with tick so behavior varies per tick but is
         # reproducible across runs with the same configured seed.
-        self._rng.seed((self._base_seed, world_state.tick))
+        self._rng.seed(self._base_seed * 1_000_003 + world_state.tick)
         self._init_tick(world_state)
 
         # Process undecided agents in priority order (highest first)

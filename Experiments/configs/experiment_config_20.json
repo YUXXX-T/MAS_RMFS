@@ -93,13 +93,14 @@
         "items_per_sku": 50
     },
     "simulation": {
+        "seed": 32,
         "order_interval": 2,
         "max_items_per_order": 2,
         "pickup_duration": 2,
         "dropoff_duration": 2,
         "station_process_duration": 5,
         "tick_delay": 0.5,
-        "p3d_view_mode": "3d",
+        "p3d_view_mode": "2d",
         "p3d_use_gpu": false,
         "night_mode": false,
         "log_level": "INFO",
@@ -110,7 +111,7 @@
         "robot_label_scale": 0.25,
         "show_selection_panel": true,
         "show_robot_paths_panel": true,
-        "use_recorded_orders": true,
+        "use_recorded_orders": false,
         "recorded_orders_path": "./OrderGenerateRecord/record/orders.json",
         "immediate_dispatch": true
     },
@@ -123,7 +124,7 @@
         },
         "task_assigner": "HungarianTaskAssigner",
         "path_planner": {
-            "name": "LNS2Planner",
+            "name": "PIBTPlanner",
             "params": {}
         },
         "pod_return_planner": "HomeReturnPlanner",
