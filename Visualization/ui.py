@@ -19,7 +19,7 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QSlider, QLabel, QFrame, QGroupBox, QSizePolicy,
-    QSplitter, QScrollArea, QGridLayout,
+    QSplitter, QScrollArea, QGridLayout, QTabWidget,
 )
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont
@@ -44,6 +44,97 @@ _STATUS_CODES = {
     "DELIVERING": 3, "RETURNING": 4, "MOVING": 5,
 }
 _STATUS_LABELS = list(_STATUS_CODES.keys())
+
+# ─── 仿真速度预设 ──────────────────────────────────────────────────
+_SIM_SPEED_PRESETS = [
+    ("1x",  10, 1),
+    ("2x",  20, 1),
+    ("5x",  50, 1),
+    ("10x", 60, 1),
+    ("Max", 60, 10),
+]
+
+
+# ─── 回放指标计算器 ──────────────────────────────────────────────────
+
+class ReplayMetricsComputer:
+    """从轨迹帧数据中计算仿真风格仪表盘指标。"""
+
+    def __init__(self, data: "TrajectoryData"):
+        self._data = data
+        self._prev_statuses: list[str] = []
+        self._cumulative_deliveries = 0
+        self._delivery_history: list[int] = []
+        self._utilization_history: list[float] = []
+        self._last_computed_frame = -1
+
+    def compute(self, frame_index: int) -> dict:
+        frame = self._data.frames[frame_index]
+        agents = frame["agents"]
+        n = len(agents)
+
+        status_counts: dict[str, int] = {}
+        current_statuses: list[str] = []
+        active_pods = 0
+
+        for agent in agents:
+            s = agent.get("status", "IDLE")
+            status_counts[s] = status_counts.get(s, 0) + 1
+            current_statuses.append(s)
+            if agent.get("pod") is not None:
+                active_pods += 1
+
+        idle_count = status_counts.get("IDLE", 0)
+        utilization = ((n - idle_count) / n * 100) if n > 0 else 0.0
+
+        new_deliveries = 0
+        if self._prev_statuses and len(self._prev_statuses) == n:
+            for prev_s, cur_s in zip(self._prev_statuses, current_statuses):
+                if prev_s == "DELIVERING" and cur_s != "DELIVERING":
+                    new_deliveries += 1
+        self._cumulative_deliveries += new_deliveries
+
+        avg_displacement = 0.0
+        if frame_index > 0:
+            prev_frame = self._data.frames[frame_index - 1]
+            total_disp = 0.0
+            for i, agent in enumerate(agents):
+                if i < len(prev_frame["agents"]):
+                    pr, pc = prev_frame["agents"][i]["pos"]
+                    cr, cc = agent["pos"]
+                    total_disp += abs(cr - pr) + abs(cc - pc)
+            avg_displacement = total_disp / n if n > 0 else 0.0
+
+        self._prev_statuses = current_statuses
+        self._delivery_history.append(self._cumulative_deliveries)
+        self._utilization_history.append(utilization)
+        self._last_computed_frame = frame_index
+
+        return {
+            "status_counts": status_counts,
+            "utilization": utilization,
+            "active_pods": active_pods,
+            "total_pods": len(self._data.pod_homes),
+            "cumulative_deliveries": self._cumulative_deliveries,
+            "avg_displacement": avg_displacement,
+            "delivery_history": self._delivery_history,
+            "utilization_history": self._utilization_history,
+            "num_agents": n,
+        }
+
+    def reset(self):
+        self._prev_statuses = []
+        self._cumulative_deliveries = 0
+        self._delivery_history = []
+        self._utilization_history = []
+        self._last_computed_frame = -1
+
+    def recompute_to_frame(self, target: int) -> dict:
+        self.reset()
+        result = {}
+        for i in range(target + 1):
+            result = self.compute(i)
+        return result
 
 
 # ─── 样式 ──────────────────────────────────────────────────────────
@@ -145,6 +236,30 @@ QSplitter::handle {
 }
 QSplitter::handle:vertical {
     height: 4px;
+}
+QTabWidget::pane {
+    border: 1px solid #333355;
+    border-radius: 4px;
+}
+QTabBar::tab {
+    background: #2a2a4a;
+    color: #aaaacc;
+    border: 1px solid #333355;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    padding: 6px 16px;
+    margin-right: 2px;
+    font-size: 12px;
+    font-weight: bold;
+}
+QTabBar::tab:selected {
+    background: #1a1a2e;
+    color: #6c63ff;
+    border-bottom: 2px solid #6c63ff;
+}
+QTabBar::tab:hover:!selected {
+    background: #3a3a5a;
 }
 """
 
@@ -249,6 +364,30 @@ QSplitter::handle {
 }
 QSplitter::handle:vertical {
     height: 4px;
+}
+QTabWidget::pane {
+    border: 1px solid #ccccdd;
+    border-radius: 4px;
+}
+QTabBar::tab {
+    background: #e0e0e8;
+    color: #555566;
+    border: 1px solid #ccccdd;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    padding: 6px 16px;
+    margin-right: 2px;
+    font-size: 12px;
+    font-weight: bold;
+}
+QTabBar::tab:selected {
+    background: #f0f0f5;
+    color: #4361ee;
+    border-bottom: 2px solid #4361ee;
+}
+QTabBar::tab:hover:!selected {
+    background: #d0d0d8;
 }
 """
 
@@ -794,6 +933,7 @@ class ReplayUI(QMainWindow):
         visualizer: "Panda3DVisualizer",
         night_mode: bool = True,
         initial_fps: int = 10,
+        simulation_mode: bool = True,
     ):
         self._qt_app = QApplication.instance() or QApplication([])
         super().__init__()
@@ -801,6 +941,7 @@ class ReplayUI(QMainWindow):
         self._viz = visualizer
         self._night_mode = night_mode
         self._initial_fps = max(1, min(60, initial_fps))
+        self._simulation_mode = simulation_mode
 
         # 回放状态
         from TrajectoryRecord.replay_state import ReplayWorldState
@@ -820,6 +961,10 @@ class ReplayUI(QMainWindow):
         self._chart_visible = False
         self._chart_last_frame = -1
 
+        # 仪表盘指标
+        self._metrics = ReplayMetricsComputer(data)
+        self._last_metrics: dict = {}
+
         self._build_ui()
         self.setStyleSheet(_DARK_STYLE if night_mode else _LIGHT_STYLE)
 
@@ -833,7 +978,11 @@ class ReplayUI(QMainWindow):
     # ── UI 构建 ───────────────────────────────────────────────
 
     def _build_ui(self):
-        self.setWindowTitle("MAS-RMFS  \u2014  Trajectory Replay")
+        sim = self._simulation_mode
+        self.setWindowTitle(
+            "MAS-RMFS  \u2014  Simulation" if sim
+            else "MAS-RMFS  \u2014  Trajectory Replay"
+        )
         self.resize(1400, 900)
 
         inner_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -847,13 +996,16 @@ class ReplayUI(QMainWindow):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        title = QLabel("\U0001f3ac MAS-RMFS Replay")
+        title = QLabel(
+            "\U0001f916 MAS-RMFS" if sim
+            else "\U0001f3ac MAS-RMFS Replay"
+        )
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         layout.addWidget(title)
 
-        # ── 回放状态 ──
-        status_box = QGroupBox("Playback")
+        # ── 状态 ──
+        status_box = QGroupBox("Simulation" if sim else "Playback")
         status_layout = QVBoxLayout(status_box)
 
         self._status_label = QLabel("\u23f8  PAUSED")
@@ -861,7 +1013,7 @@ class ReplayUI(QMainWindow):
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_layout.addWidget(self._status_label)
 
-        self._frame_label = QLabel("Frame: 0 / 0")
+        self._frame_label = QLabel("Tick: 0" if sim else "Frame: 0 / 0")
         self._frame_label.setObjectName("tickLabel")
         self._frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_layout.addWidget(self._frame_label)
@@ -869,6 +1021,8 @@ class ReplayUI(QMainWindow):
         info_row = QHBoxLayout()
         self._tick_label = QLabel("Tick: 0")
         self._agents_label = QLabel(f"Agents: {self._data.num_agents}")
+        if sim:
+            self._tick_label.setVisible(False)
         info_row.addWidget(self._tick_label)
         info_row.addWidget(self._agents_label)
         status_layout.addLayout(info_row)
@@ -893,26 +1047,30 @@ class ReplayUI(QMainWindow):
         btn_row.addWidget(self._next_btn)
         ctrl_layout.addLayout(btn_row)
 
-        # 帧滑块
-        slider_label = QLabel("\U0001f39e  Frame")
+        # ── 回放控件容器（仿真模式下隐藏） ──
+        self._replay_controls_container = QWidget()
+        rc_layout = QVBoxLayout(self._replay_controls_container)
+        rc_layout.setContentsMargins(0, 0, 0, 0)
+        rc_layout.setSpacing(6)
+
+        slider_label = QLabel("🎞  Frame")
         slider_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        ctrl_layout.addWidget(slider_label)
+        rc_layout.addWidget(slider_label)
 
         self._frame_slider = QSlider(Qt.Orientation.Horizontal)
         self._frame_slider.setRange(0, max(0, self._data.total_ticks - 1))
         self._frame_slider.setValue(0)
         self._frame_slider.valueChanged.connect(self._on_frame_slider)
-        ctrl_layout.addWidget(self._frame_slider)
+        rc_layout.addWidget(self._frame_slider)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
-        ctrl_layout.addWidget(sep)
+        rc_layout.addWidget(sep)
 
-        # 帧间隔控制 (FPS)
-        fps_label = QLabel("\u23f1  Playback FPS")
+        fps_label = QLabel("⏱  Playback FPS")
         fps_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        ctrl_layout.addWidget(fps_label)
+        rc_layout.addWidget(fps_label)
 
         fps_row = QHBoxLayout()
         self._fps_slider = QSlider(Qt.Orientation.Horizontal)
@@ -924,7 +1082,7 @@ class ReplayUI(QMainWindow):
         self._fps_value = QLabel(f"{self._initial_fps} fps")
         self._fps_value.setMinimumWidth(55)
         fps_row.addWidget(self._fps_value)
-        ctrl_layout.addLayout(fps_row)
+        rc_layout.addLayout(fps_row)
 
         preset_row = QHBoxLayout()
         preset_row.setSpacing(4)
@@ -934,17 +1092,16 @@ class ReplayUI(QMainWindow):
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _, v=val: self._set_fps(v))
             preset_row.addWidget(btn)
-        ctrl_layout.addLayout(preset_row)
+        rc_layout.addLayout(preset_row)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setFrameShadow(QFrame.Shadow.Sunken)
-        ctrl_layout.addWidget(sep2)
+        rc_layout.addWidget(sep2)
 
-        # 步长控制 (每帧前进多少 frame)
-        step_label = QLabel("\u23e9  Step Size")
+        step_label = QLabel("⏩  Step Size")
         step_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        ctrl_layout.addWidget(step_label)
+        rc_layout.addWidget(step_label)
 
         step_row = QHBoxLayout()
         self._speed_slider = QSlider(Qt.Orientation.Horizontal)
@@ -956,11 +1113,44 @@ class ReplayUI(QMainWindow):
         self._speed_value = QLabel("x1")
         self._speed_value.setMinimumWidth(40)
         step_row.addWidget(self._speed_value)
-        ctrl_layout.addLayout(step_row)
+        rc_layout.addLayout(step_row)
+
+        self._replay_controls_container.setVisible(not sim)
+        ctrl_layout.addWidget(self._replay_controls_container)
+
+        # ── 仿真速度控件（仿真模式下可见） ──
+        self._sim_speed_container = QWidget()
+        ss_layout = QVBoxLayout(self._sim_speed_container)
+        ss_layout.setContentsMargins(0, 0, 0, 0)
+        ss_layout.setSpacing(6)
+
+        speed_title = QLabel("⏱  Simulation Speed")
+        speed_title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ss_layout.addWidget(speed_title)
+
+        self._sim_speed_label = QLabel("Speed: 1x")
+        self._sim_speed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._sim_speed_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+        ss_layout.addWidget(self._sim_speed_label)
+
+        sim_preset_row = QHBoxLayout()
+        sim_preset_row.setSpacing(4)
+        for label, fps, step in _SIM_SPEED_PRESETS:
+            btn = QPushButton(label)
+            btn.setObjectName("speedPreset")
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.clicked.connect(
+                lambda _, f=fps, s=step, l=label: self._set_sim_speed(f, s, l))
+            sim_preset_row.addWidget(btn)
+        ss_layout.addLayout(sim_preset_row)
+
+        self._sim_speed_container.setVisible(sim)
+        ctrl_layout.addWidget(self._sim_speed_container)
+
         layout.addWidget(ctrl_box)
 
         # 图表切换
-        self._chart_btn = QPushButton("\U0001f4ca  Show Charts")
+        self._chart_btn = QPushButton("📊  Show Charts")
         self._chart_btn.setObjectName("chartBtn")
         self._chart_btn.clicked.connect(self._toggle_charts)
         layout.addWidget(self._chart_btn)
@@ -976,11 +1166,36 @@ class ReplayUI(QMainWindow):
         info_layout.addWidget(self._pods_label)
         info_layout.addWidget(self._stations_label)
         info_layout.addWidget(self._recorded_label)
+        if sim:
+            self._recorded_label.setVisible(False)
         layout.addWidget(info_box)
+
+        # ── 仪表盘指标（仿真模式） ──
+        if sim:
+            monitor_box = QGroupBox("Monitor")
+            mon_layout = QVBoxLayout(monitor_box)
+            self._util_label = QLabel("Utilization: 0.0%")
+            self._active_pods_label = QLabel(
+                f"Active Pods: 0 / {len(self._data.pod_homes)}")
+            self._deliveries_label = QLabel("Est. Deliveries: 0")
+            self._displacement_label = QLabel("Avg Movement: 0.00")
+            self._status_dist_label = QLabel("IDLE: 0")
+            self._status_dist_label.setWordWrap(True)
+            for lbl in [self._util_label, self._active_pods_label,
+                        self._deliveries_label, self._displacement_label,
+                        self._status_dist_label]:
+                lbl.setStyleSheet("font-size: 12px;")
+                mon_layout.addWidget(lbl)
+            layout.addWidget(monitor_box)
 
         layout.addStretch()
 
-        hint = QLabel("Space: Play/Pause  |  Left/Right: Step  |  C: Charts")
+        hint_text = (
+            "Space: Play/Pause  |  C: Charts"
+            if sim else
+            "Space: Play/Pause  |  Left/Right: Step  |  C: Charts"
+        )
+        hint = QLabel(hint_text)
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("font-size: 10px; color: #888;")
         layout.addWidget(hint)
@@ -1032,7 +1247,8 @@ class ReplayUI(QMainWindow):
 
         fig = plt.figure(figsize=(14, 3.5), facecolor=bg)
         self._chart_fig = fig
-        axes = fig.subplots(1, 2)
+        n_charts = 3 if self._simulation_mode else 2
+        axes = fig.subplots(1, n_charts)
         self._chart_axes = axes
         for ax in axes:
             ax.set_facecolor(ax_bg)
@@ -1075,8 +1291,13 @@ class ReplayUI(QMainWindow):
             for sp in ax.spines.values():
                 sp.set_color(self._chart_spine_clr)
 
-        self._draw_density(self._chart_axes[0])
-        self._draw_timeline(self._chart_axes[1])
+        if self._simulation_mode:
+            self._draw_timeline(self._chart_axes[0])
+            self._draw_density(self._chart_axes[1])
+            self._draw_estimated_throughput(self._chart_axes[2])
+        else:
+            self._draw_density(self._chart_axes[0])
+            self._draw_timeline(self._chart_axes[1])
 
         self._chart_fig.tight_layout(pad=1.5)
         self._charts_canvas.draw_idle()
@@ -1119,6 +1340,27 @@ class ReplayUI(QMainWindow):
                   framealpha=0.6, facecolor=self._chart_ax_bg,
                   edgecolor=self._chart_spine_clr,
                   labelcolor=self._chart_tick_clr)
+
+
+    def _draw_estimated_throughput(self, ax):
+        history = self._last_metrics.get("delivery_history", [])
+        if not history:
+            return
+        ticks = list(range(len(history)))
+        ax.fill_between(ticks, history, alpha=0.15, color="#2ecc71")
+        ax.plot(ticks, history, color="#2ecc71", linewidth=2)
+        current = history[-1] if history else 0
+        tick = self._replay_world.tick or 1
+        rate = current / max(tick, 1)
+        ax.text(0.98, 0.92, f"Deliveries: {current}\nRate: {rate:.2f}/tick",
+                transform=ax.transAxes, ha="right", va="top",
+                fontsize=8, color="#2ecc71", fontfamily="monospace",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor=self._chart_ax_bg,
+                          edgecolor="#2ecc71", alpha=0.8))
+        ax.set_xlabel("Tick", color=self._chart_tick_clr, fontsize=8)
+        ax.set_ylabel("Est. Deliveries", color=self._chart_tick_clr, fontsize=8)
+        ax.set_title("Estimated Throughput", color=self._chart_title_clr,
+                      fontsize=10, pad=6)
 
     # ── 嵌入 Panda3D ─────────────────────────────────────────────────
 
@@ -1176,11 +1418,16 @@ class ReplayUI(QMainWindow):
                 new_frame = ws.total_frames - 1
                 self._paused = True
                 self._play_btn.setText("\u25b6  Play")
-                self._status_label.setText("\u23f9  END")
+                self._status_label.setText("\u23f9  STOPPED" if self._simulation_mode else "\u23f9  END")
                 self._status_label.setStyleSheet(
                     "color: #e74c3c; font-size: 14px; font-weight: bold;")
             ws.set_frame(new_frame)
             self._last_advance_time = now
+
+            # 计算仪表盘指标
+            if self._simulation_mode:
+                self._last_metrics = self._metrics.compute(ws.current_frame_index)
+                self._update_metrics_display()
 
         # 驱动 Panda3D
         self._viz._update_pods(ws)
@@ -1207,7 +1454,10 @@ class ReplayUI(QMainWindow):
     def _update_info(self):
         ws = self._replay_world
         idx = ws.current_frame_index
-        self._frame_label.setText(f"Frame: {idx} / {ws.total_frames - 1}")
+        if self._simulation_mode:
+            self._frame_label.setText(f"Tick: {ws.tick}")
+        else:
+            self._frame_label.setText(f"Frame: {idx} / {ws.total_frames - 1}")
         self._tick_label.setText(f"Tick: {ws.tick}")
         self._frame_slider.blockSignals(True)
         self._frame_slider.setValue(idx)
@@ -1227,14 +1477,19 @@ class ReplayUI(QMainWindow):
             ws = self._replay_world
             if ws.current_frame_index >= ws.total_frames - 1:
                 ws.set_frame(0)
+                if self._simulation_mode:
+                    self._metrics.reset()
             self._play_btn.setText("\u23f8  Pause")
-            self._status_label.setText("\u25b6  PLAYING")
+            self._status_label.setText("\u25b6  RUNNING" if self._simulation_mode else "\u25b6  PLAYING")
             self._status_label.setStyleSheet(
                 "color: #2ecc71; font-size: 14px; font-weight: bold;")
             self._last_advance_time = time.time()
 
     def _on_frame_slider(self, value):
         self._replay_world.set_frame(value)
+        if self._simulation_mode:
+            self._last_metrics = self._metrics.recompute_to_frame(value)
+            self._update_metrics_display()
 
     def _on_fps_change(self, value):
         self._frame_interval = 1.0 / value
@@ -1253,6 +1508,32 @@ class ReplayUI(QMainWindow):
         self._speed = speed
         self._speed_slider.setValue(speed)
         self._speed_value.setText(f"x{speed}")
+
+    def _set_sim_speed(self, fps: int, step: int, label: str):
+        self._frame_interval = 1.0 / fps
+        self._speed = step
+        self._sim_speed_label.setText(f"Speed: {label}")
+        self._fps_slider.setValue(fps)
+        self._speed_slider.setValue(step)
+
+    def _update_metrics_display(self):
+        if not self._simulation_mode or not self._last_metrics:
+            return
+        m = self._last_metrics
+        self._util_label.setText(f"Utilization: {m['utilization']:.1f}%")
+        self._active_pods_label.setText(
+            f"Active Pods: {m['active_pods']} / {m['total_pods']}")
+        self._deliveries_label.setText(
+            f"Est. Deliveries: {m['cumulative_deliveries']}")
+        self._displacement_label.setText(
+            f"Avg Movement: {m['avg_displacement']:.2f}")
+        parts = []
+        for s in _STATUS_LABELS:
+            cnt = m['status_counts'].get(s, 0)
+            if cnt > 0:
+                parts.append(f"{s}: {cnt}")
+        self._status_dist_label.setText(
+            " | ".join(parts) if parts else "All IDLE")
 
     def _toggle_charts(self):
         self._chart_visible = not self._chart_visible
@@ -1293,13 +1574,22 @@ class ReplayUI(QMainWindow):
     # ── 公共 API ────────────────────────────────────────────────────
 
     def run(self):
-        print("=" * 60)
-        print("MAS-RMFS Trajectory Replay (Panda3D)")
-        print(f"  Map: {self._data.rows}x{self._data.cols}")
-        print(f"  Agents: {self._data.num_agents}")
-        print(f"  Frames: {self._data.total_ticks}")
-        print(f"  Recorded: {self._data.record_time}")
-        print("=" * 60)
+        if self._simulation_mode:
+            print("=" * 60)
+            print("MAS-RMFS Simulation (Replay-driven)")
+            print(f"  Map: {self._data.rows}x{self._data.cols}")
+            print(f"  Agents: {self._data.num_agents}")
+            print(f"  Pods: {len(self._data.pod_homes)}")
+            print(f"  Stations: {len(self._data.stations)}")
+            print("=" * 60)
+        else:
+            print("=" * 60)
+            print("MAS-RMFS Trajectory Replay (Panda3D)")
+            print(f"  Map: {self._data.rows}x{self._data.cols}")
+            print(f"  Agents: {self._data.num_agents}")
+            print(f"  Frames: {self._data.total_ticks}")
+            print(f"  Recorded: {self._data.record_time}")
+            print("=" * 60)
         self.show()
         self._qt_app.exec()
 
@@ -1329,6 +1619,7 @@ class MultiReplayUI(QMainWindow):
         visualizer,
         night_mode: bool = True,
         initial_fps: int = 10,
+        simulation_mode: bool = True,
     ):
         self._qt_app = QApplication.instance() or QApplication([])
         super().__init__()
@@ -1338,6 +1629,7 @@ class MultiReplayUI(QMainWindow):
         self._viz = visualizer
         self._night_mode = night_mode
         self._initial_fps = max(1, min(60, initial_fps))
+        self._simulation_mode = simulation_mode
 
         # 回放状态
         from TrajectoryRecord.replay_state import ReplayWorldState
@@ -1355,6 +1647,11 @@ class MultiReplayUI(QMainWindow):
         self._chart_last_frame = -1
         self._density: np.ndarray | None = None
         self._status_history: list[list[int]] = []
+
+        # 仪表盘指标
+        self._metrics_computers = [ReplayMetricsComputer(d) for d in datasets]
+        self._last_metrics_list: list[dict] = [{} for _ in datasets]
+        self._last_metrics: dict = {}
 
         self._build_ui()
         self.setStyleSheet(_DARK_STYLE if night_mode else _LIGHT_STYLE)
@@ -1375,10 +1672,16 @@ class MultiReplayUI(QMainWindow):
         grid_rows, grid_cols = self._layout
         n = len(self._datasets)
 
-        self.setWindowTitle(
-            f"MAS-RMFS  \u2014  Multi-Replay {grid_rows}\u00d7{grid_cols}  "
-            f"({n} trajectories)"
-        )
+        if self._simulation_mode:
+            self.setWindowTitle(
+                f"MAS-RMFS  \u2014  Multi-Agent Simulation {grid_rows}\u00d7{grid_cols}  "
+                f"({n} scenarios)"
+            )
+        else:
+            self.setWindowTitle(
+                f"MAS-RMFS  \u2014  Multi-Replay {grid_rows}\u00d7{grid_cols}  "
+                f"({n} trajectories)"
+            )
         self.resize(1500, 950)
 
         inner_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1392,13 +1695,16 @@ class MultiReplayUI(QMainWindow):
         lo.setContentsMargins(12, 12, 12, 12)
         lo.setSpacing(10)
 
-        title = QLabel("\U0001f3ac Multi-Replay")
+        title = QLabel(
+            "\U0001f916 Multi-Agent Simulation" if self._simulation_mode
+            else "\U0001f3ac Multi-Replay"
+        )
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         lo.addWidget(title)
 
         # ── 回放状态 ──
-        status_box = QGroupBox("Playback")
+        status_box = QGroupBox("Simulation" if self._simulation_mode else "Playback")
         status_layout = QVBoxLayout(status_box)
 
         self._status_label = QLabel("\u23f8  PAUSED")
@@ -1406,7 +1712,7 @@ class MultiReplayUI(QMainWindow):
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_layout.addWidget(self._status_label)
 
-        self._frame_label = QLabel("Frame: 0 / 0")
+        self._frame_label = QLabel("Tick: 0" if self._simulation_mode else "Frame: 0 / 0")
         self._frame_label.setObjectName("tickLabel")
         self._frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_layout.addWidget(self._frame_label)
@@ -1446,28 +1752,35 @@ class MultiReplayUI(QMainWindow):
         self._next_btn = QPushButton("Next  \u23ed")
         self._next_btn.clicked.connect(lambda: self._step(1))
         btn_row.addWidget(self._next_btn)
+        if self._simulation_mode:
+            self._prev_btn.setVisible(False)
+            self._next_btn.setVisible(False)
         ctrl_layout.addLayout(btn_row)
 
-        # 帧滑块
+        # ── 回放控件容器（仿真模式下隐藏） ──
+        self._replay_controls_container = QWidget()
+        rc_layout = QVBoxLayout(self._replay_controls_container)
+        rc_layout.setContentsMargins(0, 0, 0, 0)
+        rc_layout.setSpacing(6)
+
         slider_label = QLabel("\U0001f39e  Frame")
         slider_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        ctrl_layout.addWidget(slider_label)
+        rc_layout.addWidget(slider_label)
 
         self._frame_slider = QSlider(Qt.Orientation.Horizontal)
         self._frame_slider.setRange(0, max(0, self._max_frames - 1))
         self._frame_slider.setValue(0)
         self._frame_slider.valueChanged.connect(self._on_frame_slider)
-        ctrl_layout.addWidget(self._frame_slider)
+        rc_layout.addWidget(self._frame_slider)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
-        ctrl_layout.addWidget(sep)
+        rc_layout.addWidget(sep)
 
-        # FPS 控制
         fps_label = QLabel("\u23f1  Playback FPS")
         fps_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        ctrl_layout.addWidget(fps_label)
+        rc_layout.addWidget(fps_label)
 
         fps_row = QHBoxLayout()
         self._fps_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1479,7 +1792,7 @@ class MultiReplayUI(QMainWindow):
         self._fps_value = QLabel(f"{self._initial_fps} fps")
         self._fps_value.setMinimumWidth(55)
         fps_row.addWidget(self._fps_value)
-        ctrl_layout.addLayout(fps_row)
+        rc_layout.addLayout(fps_row)
 
         preset_row = QHBoxLayout()
         preset_row.setSpacing(4)
@@ -1491,17 +1804,16 @@ class MultiReplayUI(QMainWindow):
                               QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _, v=val: self._set_fps(v))
             preset_row.addWidget(btn)
-        ctrl_layout.addLayout(preset_row)
+        rc_layout.addLayout(preset_row)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setFrameShadow(QFrame.Shadow.Sunken)
-        ctrl_layout.addWidget(sep2)
+        rc_layout.addWidget(sep2)
 
-        # 步长控制
         step_label = QLabel("\u23e9  Step Size")
         step_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        ctrl_layout.addWidget(step_label)
+        rc_layout.addWidget(step_label)
 
         step_row = QHBoxLayout()
         self._speed_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1513,7 +1825,41 @@ class MultiReplayUI(QMainWindow):
         self._speed_value = QLabel("x1")
         self._speed_value.setMinimumWidth(40)
         step_row.addWidget(self._speed_value)
-        ctrl_layout.addLayout(step_row)
+        rc_layout.addLayout(step_row)
+
+        self._replay_controls_container.setVisible(not self._simulation_mode)
+        ctrl_layout.addWidget(self._replay_controls_container)
+
+        # ── 仿真速度控件（仿真模式下可见） ──
+        self._sim_speed_container = QWidget()
+        ss_layout = QVBoxLayout(self._sim_speed_container)
+        ss_layout.setContentsMargins(0, 0, 0, 0)
+        ss_layout.setSpacing(6)
+
+        speed_title = QLabel("\u23f1  Simulation Speed")
+        speed_title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ss_layout.addWidget(speed_title)
+
+        self._sim_speed_label = QLabel("Speed: 1x")
+        self._sim_speed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._sim_speed_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+        ss_layout.addWidget(self._sim_speed_label)
+
+        sim_preset_row = QHBoxLayout()
+        sim_preset_row.setSpacing(4)
+        for label_text, fps, step in _SIM_SPEED_PRESETS:
+            btn = QPushButton(label_text)
+            btn.setObjectName("speedPreset")
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding,
+                              QSizePolicy.Policy.Fixed)
+            btn.clicked.connect(
+                lambda _, f=fps, s=step, l=label_text: self._set_sim_speed(f, s, l))
+            sim_preset_row.addWidget(btn)
+        ss_layout.addLayout(sim_preset_row)
+
+        self._sim_speed_container.setVisible(self._simulation_mode)
+        ctrl_layout.addWidget(self._sim_speed_container)
+
         lo.addWidget(ctrl_box)
 
         # ── 聚焦模式控件（默认隐藏）──
@@ -1550,6 +1896,24 @@ class MultiReplayUI(QMainWindow):
             info_lo.addWidget(lbl)
         lo.addWidget(info_box)
 
+        # ── 仪表盘指标（仿真模式） ──
+        if self._simulation_mode:
+            monitor_box = QGroupBox("Monitor")
+            self._monitor_box = monitor_box
+            mon_layout = QVBoxLayout(monitor_box)
+            self._util_label = QLabel("Utilization: 0.0%")
+            self._active_pods_label = QLabel("Active Pods: 0")
+            self._deliveries_label = QLabel("Est. Deliveries: 0")
+            self._displacement_label = QLabel("Avg Movement: 0.00")
+            self._status_dist_label = QLabel("IDLE: 0")
+            self._status_dist_label.setWordWrap(True)
+            for lbl in [self._util_label, self._active_pods_label,
+                        self._deliveries_label, self._displacement_label,
+                        self._status_dist_label]:
+                lbl.setStyleSheet("font-size: 12px;")
+                mon_layout.addWidget(lbl)
+            lo.addWidget(monitor_box)
+
         lo.addStretch()
 
         hint = QLabel(
@@ -1574,12 +1938,18 @@ class MultiReplayUI(QMainWindow):
         )
         self._right_splitter.addWidget(self._panda_container)
 
+        # Dashboard 面板（仿真模式下默认可见）
+        self._dashboard = _DashboardPanel(night_mode=self._night_mode) if self._simulation_mode else None
+        if self._dashboard is not None:
+            self._right_splitter.addWidget(self._dashboard)
+
         # 图表面板（默认隐藏，聚焦时显示）
         self._charts_panel = self._build_charts_panel()
         self._charts_panel.setVisible(False)
         self._right_splitter.addWidget(self._charts_panel)
         self._right_splitter.setStretchFactor(0, 3)
-        self._right_splitter.setStretchFactor(1, 1)
+        self._right_splitter.setStretchFactor(1, 2 if self._dashboard else 0)
+        self._right_splitter.setStretchFactor(2 if self._dashboard else 1, 1)
         self._right_splitter.splitterMoved.connect(lambda *_: self._resize_panda())
 
         inner_splitter.addWidget(self._right_splitter)
@@ -1642,7 +2012,8 @@ class MultiReplayUI(QMainWindow):
 
         fig = plt.figure(figsize=(14, 3.5), facecolor=bg)
         self._chart_fig = fig
-        axes = fig.subplots(1, 2)
+        n_charts = 3 if self._simulation_mode else 2
+        axes = fig.subplots(1, n_charts)
         self._chart_axes = axes
         for ax in axes:
             ax.set_facecolor(ax_bg)
@@ -1690,8 +2061,13 @@ class MultiReplayUI(QMainWindow):
             for sp in ax.spines.values():
                 sp.set_color(self._chart_spine_clr)
 
-        self._draw_density(self._chart_axes[0])
-        self._draw_timeline(self._chart_axes[1])
+        if self._simulation_mode:
+            self._draw_timeline(self._chart_axes[0])
+            self._draw_density(self._chart_axes[1])
+            self._draw_estimated_throughput(self._chart_axes[2])
+        else:
+            self._draw_density(self._chart_axes[0])
+            self._draw_timeline(self._chart_axes[1])
 
         self._chart_fig.tight_layout(pad=1.5)
         self._charts_canvas.draw_idle()
@@ -1734,6 +2110,30 @@ class MultiReplayUI(QMainWindow):
                   edgecolor=self._chart_spine_clr,
                   labelcolor=self._chart_tick_clr)
 
+
+    def _draw_estimated_throughput(self, ax):
+        idx = self._focused_slot_index if self._focused_slot_index is not None else 0
+        m = self._last_metrics_list[idx] if self._last_metrics_list else {}
+        history = m.get("delivery_history", [])
+        if not history:
+            return
+        ticks = list(range(len(history)))
+        ax.fill_between(ticks, history, alpha=0.15, color="#2ecc71")
+        ax.plot(ticks, history, color="#2ecc71", linewidth=2)
+        current = history[-1] if history else 0
+        rw = self._replay_worlds[idx]
+        tick = rw.tick or 1
+        rate = current / max(tick, 1)
+        ax.text(0.98, 0.92, f"Deliveries: {current}\nRate: {rate:.2f}/tick",
+                transform=ax.transAxes, ha="right", va="top",
+                fontsize=8, color="#2ecc71", fontfamily="monospace",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor=self._chart_ax_bg,
+                          edgecolor="#2ecc71", alpha=0.8))
+        ax.set_xlabel("Tick", color=self._chart_tick_clr, fontsize=8)
+        ax.set_ylabel("Est. Deliveries", color=self._chart_tick_clr, fontsize=8)
+        ax.set_title("Estimated Throughput", color=self._chart_title_clr,
+                      fontsize=10, pad=6)
+
     # ── 聚焦 ────────────────────────────────────────────────────
 
     def _focus_on(self, slot_index: int):
@@ -1750,6 +2150,8 @@ class MultiReplayUI(QMainWindow):
         self._chart_visible = True
         self._charts_panel.setVisible(True)
         self._chart_btn.setText("\U0001f4ca  Hide Charts")
+        if self._dashboard is not None:
+            self._dashboard.setVisible(False)
 
         # 调整帧滑块为聚焦轨迹的范围
         rw = self._replay_worlds[slot_index]
@@ -1758,8 +2160,9 @@ class MultiReplayUI(QMainWindow):
 
         # 显示聚焦模式控件
         self._back_btn.setVisible(True)
+        prefix = "Simulation:" if self._simulation_mode else "Focused:"
         self._focus_label.setText(
-            f"Focused: [{slot_index}] {self._labels[slot_index]}")
+            f"{prefix} [{slot_index}] {self._labels[slot_index]}")
         self._focus_label.setVisible(True)
         self._chart_btn.setVisible(True)
 
@@ -1786,6 +2189,8 @@ class MultiReplayUI(QMainWindow):
         # 隐藏图表
         self._chart_visible = False
         self._charts_panel.setVisible(False)
+        if self._dashboard is not None:
+            self._dashboard.setVisible(True)
 
         # 恢复帧滑块为全局范围
         self._frame_slider.setRange(0, max(0, self._max_frames - 1))
@@ -1808,6 +2213,66 @@ class MultiReplayUI(QMainWindow):
             f"({n} trajectories)")
 
         QTimer.singleShot(50, self._resize_panda)
+
+    def _set_sim_speed(self, fps: int, step: int, label: str):
+        self._frame_interval = 1.0 / fps
+        self._speed = step
+        self._sim_speed_label.setText(f"Speed: {label}")
+        self._fps_slider.setValue(fps)
+        self._speed_slider.setValue(step)
+
+    def _compute_aggregated_metrics(self) -> dict:
+        valid = [m for m in self._last_metrics_list if m]
+        if not valid:
+            return {}
+        total_agents = sum(m.get('num_agents', 0) for m in valid)
+        if total_agents == 0:
+            return {}
+        util = sum(m['utilization'] * m['num_agents'] for m in valid) / total_agents
+        deliveries = sum(m.get('cumulative_deliveries', 0) for m in valid)
+        disp = sum(m.get('avg_displacement', 0) for m in valid) / len(valid)
+        active = sum(m.get('active_pods', 0) for m in valid)
+        total_pods = sum(m.get('total_pods', 0) for m in valid)
+        merged_status: dict[str, int] = {}
+        for m in valid:
+            for s, cnt in m.get('status_counts', {}).items():
+                merged_status[s] = merged_status.get(s, 0) + cnt
+        return {
+            'utilization': util,
+            'cumulative_deliveries': deliveries,
+            'avg_displacement': disp,
+            'active_pods': active,
+            'total_pods': total_pods,
+            'status_counts': merged_status,
+            'num_agents': total_agents,
+        }
+
+    def _update_metrics_display(self):
+        if not self._simulation_mode or not self._last_metrics:
+            return
+        n = len(self._datasets)
+        focused = self._focused_slot_index
+        if focused is not None:
+            self._monitor_box.setTitle(
+                f"Monitor [{focused}] {self._labels[focused]}")
+        else:
+            self._monitor_box.setTitle(f"Monitor (All {n})")
+        m = self._last_metrics
+        self._util_label.setText(f"Utilization: {m['utilization']:.1f}%")
+        self._active_pods_label.setText(
+            f"Active Pods: {m['active_pods']} / {m.get('total_pods', '?')}")
+        self._deliveries_label.setText(
+            f"Est. Deliveries: {m['cumulative_deliveries']}")
+        self._displacement_label.setText(
+            f"Avg Movement: {m['avg_displacement']:.2f}")
+        parts = []
+        for s in _STATUS_LABELS:
+            cnt = m['status_counts'].get(s, 0)
+            if cnt > 0:
+                parts.append(f"{s}: {cnt}")
+        self._status_dist_label.setText(
+            " | ".join(parts) if parts else "All IDLE")
+
 
     def _toggle_charts(self):
         self._chart_visible = not self._chart_visible
@@ -1852,7 +2317,7 @@ class MultiReplayUI(QMainWindow):
                     new_frame = rw.total_frames - 1
                     self._paused = True
                     self._play_btn.setText("\u25b6  Play")
-                    self._status_label.setText("\u23f9  END")
+                    self._status_label.setText("\u23f9  STOPPED" if self._simulation_mode else "\u23f9  END")
                     self._status_label.setStyleSheet(
                         "color: #e74c3c; font-size: 14px; font-weight: bold;")
                 rw.set_frame(new_frame)
@@ -1870,6 +2335,19 @@ class MultiReplayUI(QMainWindow):
                 for rw in self._replay_worlds:
                     rw.set_frame(min(new_frame, rw.total_frames - 1))
             self._last_advance_time = now
+
+            # 计算仪表盘指标
+            if self._simulation_mode:
+                for i, rw in enumerate(self._replay_worlds):
+                    if self._current_frame < rw.total_frames:
+                        self._last_metrics_list[i] = self._metrics_computers[i].compute(rw.current_frame_index)
+                if self._focused_slot_index is not None:
+                    self._last_metrics = self._last_metrics_list[self._focused_slot_index]
+                else:
+                    self._last_metrics = self._compute_aggregated_metrics()
+                self._update_metrics_display()
+                if self._dashboard is not None:
+                    self._dashboard.update(self._last_metrics_list, self._labels)
 
         # 驱动 Panda3D
         if self._focused_slot_index is not None:
@@ -1908,10 +2386,16 @@ class MultiReplayUI(QMainWindow):
         if self._focused_slot_index is not None:
             rw = self._replay_worlds[self._focused_slot_index]
             idx = rw.current_frame_index
-            self._frame_label.setText(f"Frame: {idx} / {rw.total_frames - 1}")
+            if self._simulation_mode:
+                self._frame_label.setText(f"Tick: {self._current_frame}")
+            else:
+                self._frame_label.setText(f"Frame: {idx} / {rw.total_frames - 1}")
         else:
             idx = self._current_frame
-            self._frame_label.setText(f"Frame: {idx} / {self._max_frames - 1}")
+            if self._simulation_mode:
+                self._frame_label.setText(f"Tick: {self._current_frame}")
+            else:
+                self._frame_label.setText(f"Frame: {idx} / {self._max_frames - 1}")
         self._frame_slider.blockSignals(True)
         self._frame_slider.setValue(idx)
         self._frame_slider.blockSignals(False)
@@ -1941,10 +2425,14 @@ class MultiReplayUI(QMainWindow):
             else:
                 if self._current_frame >= self._max_frames - 1:
                     self._current_frame = 0
+                if self._simulation_mode:
+                    for mc in self._metrics_computers:
+                        mc.reset()
+                    self._last_metrics_list = [{} for _ in self._datasets]
                     for rw in self._replay_worlds:
                         rw.set_frame(0)
             self._play_btn.setText("\u23f8  Pause")
-            self._status_label.setText("\u25b6  PLAYING")
+            self._status_label.setText("\u25b6  RUNNING" if self._simulation_mode else "\u25b6  PLAYING")
             self._status_label.setStyleSheet(
                 "color: #2ecc71; font-size: 14px; font-weight: bold;")
             self._last_advance_time = time.time()
@@ -2077,17 +2565,190 @@ QFrame#trajCard:hover {
 }
 """
 
+# ─── 轨迹对比色板 ─────────────────────────────────────────────────
+_TRAJ_COLORS = [
+    "#4361ee", "#e07c24", "#2ecc71", "#e74c3c", "#9b59b6",
+    "#1abc9c", "#f39c12", "#3498db", "#e91e63", "#00bcd4",
+]
+
+
+class _DashboardPanel(QWidget):
+    """多轨迹实时仪表盘面板（2x2 matplotlib 图表）。"""
+
+    def __init__(self, night_mode: bool = True):
+        super().__init__()
+        self._night_mode = night_mode
+        self._last_redraw_time = 0.0
+        self._build_ui()
+
+    def _build_ui(self):
+        nm = self._night_mode
+        bg = "#0f0f1a" if nm else "#f5f5f8"
+        ax_bg = "#16162a" if nm else "#ffffff"
+        self._tick_clr = "#aaaaaa" if nm else "#333333"
+        self._spine_clr = "#333355" if nm else "#bbbbcc"
+        self._title_clr = "#e0e0e0" if nm else "#222222"
+        self._ax_bg = ax_bg
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+
+        fig = plt.figure(figsize=(14, 7), facecolor=bg)
+        self._fig = fig
+        self._axes = fig.subplots(2, 2)
+        for row in self._axes:
+            for ax in row:
+                ax.set_facecolor(ax_bg)
+                ax.tick_params(colors=self._tick_clr, labelsize=7)
+                for sp in ax.spines.values():
+                    sp.set_color(self._spine_clr)
+
+        self._canvas = FigureCanvasQTAgg(fig)
+        layout.addWidget(self._canvas)
+        fig.tight_layout(pad=2.0)
+
+    def update(self, metrics_list: list[dict], labels: list[str]):
+        now = time.time()
+        if now - self._last_redraw_time < 0.5:
+            return
+        self._last_redraw_time = now
+
+        valid = [(i, m) for i, m in enumerate(metrics_list) if m]
+        if not valid:
+            return
+
+        for row in self._axes:
+            for ax in row:
+                ax.clear()
+                ax.set_facecolor(self._ax_bg)
+                ax.tick_params(colors=self._tick_clr, labelsize=7)
+                for sp in ax.spines.values():
+                    sp.set_color(self._spine_clr)
+
+        self._draw_utilization_trend(valid, labels)
+        self._draw_delivery_trend(valid, labels)
+        self._draw_comparison_bars(valid, labels)
+        self._draw_status_distribution(valid)
+
+        self._fig.tight_layout(pad=2.0)
+        self._canvas.draw_idle()
+
+    def _draw_utilization_trend(self, valid, labels):
+        ax = self._axes[0][0]
+        for idx, m in valid:
+            hist = m.get('utilization_history', [])
+            if hist:
+                clr = _TRAJ_COLORS[idx % len(_TRAJ_COLORS)]
+                ax.plot(range(len(hist)), hist, color=clr,
+                        linewidth=1.5, alpha=0.85, label=labels[idx])
+        ax.set_xlabel("Tick", color=self._tick_clr, fontsize=8)
+        ax.set_ylabel("Utilization %", color=self._tick_clr, fontsize=8)
+        ax.set_title("Utilization Trend", color=self._title_clr,
+                      fontsize=10, pad=6)
+        if len(valid) <= 6:
+            ax.legend(fontsize=7, loc='upper left',
+                      facecolor=self._ax_bg, edgecolor=self._spine_clr,
+                      labelcolor=self._tick_clr)
+
+    def _draw_delivery_trend(self, valid, labels):
+        ax = self._axes[0][1]
+        for idx, m in valid:
+            hist = m.get('delivery_history', [])
+            if hist:
+                clr = _TRAJ_COLORS[idx % len(_TRAJ_COLORS)]
+                ax.plot(range(len(hist)), hist, color=clr,
+                        linewidth=1.5, alpha=0.85, label=labels[idx])
+        ax.set_xlabel("Tick", color=self._tick_clr, fontsize=8)
+        ax.set_ylabel("Cumulative Deliveries", color=self._tick_clr, fontsize=8)
+        ax.set_title("Delivery Trend", color=self._title_clr,
+                      fontsize=10, pad=6)
+        if len(valid) <= 6:
+            ax.legend(fontsize=7, loc='upper left',
+                      facecolor=self._ax_bg, edgecolor=self._spine_clr,
+                      labelcolor=self._tick_clr)
+
+    def _draw_comparison_bars(self, valid, labels):
+        ax = self._axes[1][0]
+        n = len(valid)
+        indices = list(range(n))
+        bar_labels = [labels[idx] for idx, _ in valid]
+
+        utils = [m.get('utilization', 0) for _, m in valid]
+        deliveries = [m.get('cumulative_deliveries', 0) for _, m in valid]
+        active = [m.get('active_pods', 0) for _, m in valid]
+
+        max_d = max(deliveries) if deliveries and max(deliveries) > 0 else 1
+        max_a = max(active) if active and max(active) > 0 else 1
+        norm_d = [d / max_d * 100 for d in deliveries]
+        norm_a = [a / max_a * 100 for a in active]
+
+        w = 0.25
+        x = np.arange(n)
+        ax.bar(x - w, utils, w, color="#4361ee", alpha=0.8, label="Util %")
+        ax.bar(x, norm_d, w, color="#2ecc71", alpha=0.8,
+               label=f"Deliveries (norm, max={max_d})")
+        ax.bar(x + w, norm_a, w, color="#e07c24", alpha=0.8,
+               label=f"Active Pods (norm, max={max_a})")
+
+        ax.set_xticks(x)
+        tick_labels = [f"[{idx}]" for idx, _ in valid]
+        ax.set_xticklabels(tick_labels, fontsize=7, color=self._tick_clr)
+        ax.set_ylabel("Normalized %", color=self._tick_clr, fontsize=8)
+        ax.set_title("Per-Trajectory Comparison", color=self._title_clr,
+                      fontsize=10, pad=6)
+        ax.legend(fontsize=6, loc='upper right',
+                  facecolor=self._ax_bg, edgecolor=self._spine_clr,
+                  labelcolor=self._tick_clr)
+
+    def _draw_status_distribution(self, valid):
+        ax = self._axes[1][1]
+        merged: dict[str, int] = {}
+        for _, m in valid:
+            for s, cnt in m.get('status_counts', {}).items():
+                merged[s] = merged.get(s, 0) + cnt
+
+        status_colors = {
+            "IDLE": "#555566" if self._night_mode else "#aaaaaa",
+            "MOVING_TO_POD": "#4361ee",
+            "CARRYING": "#f0a500",
+            "DELIVERING": "#e07c24",
+            "RETURNING": "#7b2cbf",
+            "MOVING": "#2ec4b6",
+        }
+
+        filtered = [(s, merged.get(s, 0)) for s in _STATUS_LABELS if merged.get(s, 0) > 0]
+        if not filtered:
+            ax.set_title("Status Distribution", color=self._title_clr,
+                          fontsize=10, pad=6)
+            return
+
+        labels_s = [s for s, _ in filtered]
+        sizes = [c for _, c in filtered]
+        colors = [status_colors.get(s, "#888888") for s in labels_s]
+
+        wedges, texts, autotexts = ax.pie(
+            sizes, labels=labels_s, colors=colors, autopct='%1.0f%%',
+            textprops={'fontsize': 7, 'color': self._tick_clr},
+            startangle=90, pctdistance=0.75)
+        for t in autotexts:
+            t.set_fontsize(7)
+            t.set_color(self._title_clr)
+        ax.set_title("Aggregated Status", color=self._title_clr,
+                      fontsize=10, pad=6)
+
 
 class _TrajectoryCard(QFrame):
     """列表模式中每个轨迹数据包的卡片控件。"""
 
     def __init__(self, index: int, data, label: str,
-                 night_mode: bool, on_click):
+                 night_mode: bool = True, simulation_mode: bool = True,
+                 on_click=None):
         super().__init__()
         self.setObjectName("trajCard")
         self._index = index
         self._on_click = on_click
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._simulation_mode = simulation_mode
         self.setStyleSheet(_CARD_DARK_STYLE if night_mode else _CARD_LIGHT_STYLE)
         self.setMinimumHeight(120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -2111,6 +2772,8 @@ class _TrajectoryCard(QFrame):
         if data.record_time:
             time_label = QLabel(data.record_time)
             time_label.setStyleSheet("font-size: 10px; color: #888;")
+            if self._simulation_mode:
+                time_label.setVisible(False)
             title_row.addWidget(time_label)
         layout.addLayout(title_row)
 
@@ -2139,9 +2802,20 @@ class _TrajectoryCard(QFrame):
         self._status_label.setStyleSheet(f"font-size: 10px; color: {clr};")
         layout.addWidget(self._status_label)
 
+        if self._simulation_mode:
+            self._metrics_label = QLabel("Util: — | Deliveries: —")
+            self._metrics_label.setStyleSheet(
+                "font-size: 11px; font-weight: bold; color: #2ecc71;")
+            layout.addWidget(self._metrics_label)
+
     def update_metrics(self, frame_idx: int, total_frames: int,
-                       status_counts: dict, carrying: int):
-        self._frame_label.setText(f"Frame: {frame_idx} / {total_frames - 1}")
+                       status_counts: dict, carrying: int,
+                       utilization: float | None = None,
+                       deliveries: int | None = None):
+        if self._simulation_mode:
+            self._frame_label.setText(f"Tick: {frame_idx}")
+        else:
+            self._frame_label.setText(f"Frame: {frame_idx} / {total_frames - 1}")
         parts = []
         for s in ("IDLE", "MOVING_TO_POD", "CARRYING", "DELIVERING",
                   "RETURNING", "MOVING"):
@@ -2151,6 +2825,9 @@ class _TrajectoryCard(QFrame):
         if carrying > 0:
             parts.append(f"Pods carried: {carrying}")
         self._status_label.setText("  |  ".join(parts))
+        if self._simulation_mode and utilization is not None:
+            self._metrics_label.setText(
+                f"Util: {utilization:.1f}%  |  Deliveries: {deliveries or 0}")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -2172,6 +2849,7 @@ class ListReplayUI(QMainWindow):
         labels: list[str],
         night_mode: bool = True,
         initial_fps: int = 10,
+        simulation_mode: bool = True,
     ):
         self._qt_app = QApplication.instance() or QApplication([])
         super().__init__()
@@ -2179,6 +2857,7 @@ class ListReplayUI(QMainWindow):
         self._labels = labels
         self._night_mode = night_mode
         self._initial_fps = max(1, min(60, initial_fps))
+        self._simulation_mode = simulation_mode
 
         from TrajectoryRecord.replay_state import ReplayWorldState
         self._replay_worlds = [ReplayWorldState(d) for d in datasets]
@@ -2195,6 +2874,11 @@ class ListReplayUI(QMainWindow):
         self._panda_embedded = False
         self._chart_visible = False
         self._chart_last_frame = -1
+
+        # 仪表盘指标
+        self._metrics_computers = [ReplayMetricsComputer(d) for d in datasets]
+        self._last_metrics_list: list[dict] = [{} for _ in datasets]
+        self._last_metrics: dict = {}
         self._density = None
         self._status_history = []
 
@@ -2210,8 +2894,12 @@ class ListReplayUI(QMainWindow):
 
     def _build_ui(self):
         n = len(self._datasets)
-        self.setWindowTitle(
-            f"MAS-RMFS  —  List Replay ({n} trajectories)")
+        if self._simulation_mode:
+            self.setWindowTitle(
+                f"MAS-RMFS  —  Simulation ({n} scenarios)")
+        else:
+            self.setWindowTitle(
+                f"MAS-RMFS  —  List Replay ({n} trajectories)")
         self.resize(1500, 950)
 
         inner_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -2225,13 +2913,16 @@ class ListReplayUI(QMainWindow):
         lo.setContentsMargins(12, 12, 12, 12)
         lo.setSpacing(10)
 
-        title = QLabel("\U0001f4cb List Replay")
+        title = QLabel(
+            "\U0001f916 Multi-Agent Simulation" if self._simulation_mode
+            else "\U0001f3ac List Replay"
+        )
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         lo.addWidget(title)
 
         # 回放状态
-        status_box = QGroupBox("Playback")
+        status_box = QGroupBox("Simulation" if self._simulation_mode else "Playback")
         status_layout = QVBoxLayout(status_box)
 
         self._status_label = QLabel("⏸  PAUSED")
@@ -2239,7 +2930,7 @@ class ListReplayUI(QMainWindow):
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_layout.addWidget(self._status_label)
 
-        self._frame_label = QLabel("Frame: 0 / 0")
+        self._frame_label = QLabel("Tick: 0" if self._simulation_mode else "Frame: 0 / 0")
         self._frame_label.setObjectName("tickLabel")
         self._frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_layout.addWidget(self._frame_label)
@@ -2261,31 +2952,39 @@ class ListReplayUI(QMainWindow):
 
         self._prev_btn = QPushButton("⏮  Prev")
         self._prev_btn.clicked.connect(lambda: self._step(-1))
-        btn_row.addWidget(self._prev_btn)
-
         self._next_btn = QPushButton("Next  ⏭")
         self._next_btn.clicked.connect(lambda: self._step(1))
+        btn_row.addWidget(self._prev_btn)
         btn_row.addWidget(self._next_btn)
+        if self._simulation_mode:
+            self._prev_btn.setVisible(False)
+            self._next_btn.setVisible(False)
         ctrl_layout.addLayout(btn_row)
+
+        # ── 回放控件容器（仿真模式下隐藏） ──
+        self._replay_controls_container = QWidget()
+        rc_layout = QVBoxLayout(self._replay_controls_container)
+        rc_layout.setContentsMargins(0, 0, 0, 0)
+        rc_layout.setSpacing(6)
 
         slider_label = QLabel("\U0001f39e  Frame")
         slider_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        ctrl_layout.addWidget(slider_label)
+        rc_layout.addWidget(slider_label)
 
         self._frame_slider = QSlider(Qt.Orientation.Horizontal)
         self._frame_slider.setRange(0, max(0, self._max_frames - 1))
         self._frame_slider.setValue(0)
         self._frame_slider.valueChanged.connect(self._on_frame_slider)
-        ctrl_layout.addWidget(self._frame_slider)
+        rc_layout.addWidget(self._frame_slider)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
-        ctrl_layout.addWidget(sep)
+        rc_layout.addWidget(sep)
 
         fps_label = QLabel("⏱  Playback FPS")
         fps_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        ctrl_layout.addWidget(fps_label)
+        rc_layout.addWidget(fps_label)
 
         fps_row = QHBoxLayout()
         self._fps_slider = QSlider(Qt.Orientation.Horizontal)
@@ -2297,7 +2996,7 @@ class ListReplayUI(QMainWindow):
         self._fps_value = QLabel(f"{self._initial_fps} fps")
         self._fps_value.setMinimumWidth(55)
         fps_row.addWidget(self._fps_value)
-        ctrl_layout.addLayout(fps_row)
+        rc_layout.addLayout(fps_row)
 
         preset_row = QHBoxLayout()
         preset_row.setSpacing(4)
@@ -2309,16 +3008,16 @@ class ListReplayUI(QMainWindow):
                               QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _, v=val: self._set_fps(v))
             preset_row.addWidget(btn)
-        ctrl_layout.addLayout(preset_row)
+        rc_layout.addLayout(preset_row)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setFrameShadow(QFrame.Shadow.Sunken)
-        ctrl_layout.addWidget(sep2)
+        rc_layout.addWidget(sep2)
 
         step_label = QLabel("⏩  Step Size")
         step_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        ctrl_layout.addWidget(step_label)
+        rc_layout.addWidget(step_label)
 
         step_row = QHBoxLayout()
         self._speed_slider = QSlider(Qt.Orientation.Horizontal)
@@ -2330,7 +3029,41 @@ class ListReplayUI(QMainWindow):
         self._speed_value = QLabel("x1")
         self._speed_value.setMinimumWidth(40)
         step_row.addWidget(self._speed_value)
-        ctrl_layout.addLayout(step_row)
+        rc_layout.addLayout(step_row)
+
+        self._replay_controls_container.setVisible(not self._simulation_mode)
+        ctrl_layout.addWidget(self._replay_controls_container)
+
+        # ── 仿真速度控件（仿真模式下可见） ──
+        self._sim_speed_container = QWidget()
+        ss_layout = QVBoxLayout(self._sim_speed_container)
+        ss_layout.setContentsMargins(0, 0, 0, 0)
+        ss_layout.setSpacing(6)
+
+        speed_title = QLabel("⏱  Simulation Speed")
+        speed_title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ss_layout.addWidget(speed_title)
+
+        self._sim_speed_label = QLabel("Speed: 1x")
+        self._sim_speed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._sim_speed_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+        ss_layout.addWidget(self._sim_speed_label)
+
+        sim_preset_row = QHBoxLayout()
+        sim_preset_row.setSpacing(4)
+        for label_text, fps, step in _SIM_SPEED_PRESETS:
+            btn = QPushButton(label_text)
+            btn.setObjectName("speedPreset")
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding,
+                              QSizePolicy.Policy.Fixed)
+            btn.clicked.connect(
+                lambda _, f=fps, s=step, l=label_text: self._set_sim_speed(f, s, l))
+            sim_preset_row.addWidget(btn)
+        ss_layout.addLayout(sim_preset_row)
+
+        self._sim_speed_container.setVisible(self._simulation_mode)
+        ctrl_layout.addWidget(self._sim_speed_container)
+
         lo.addWidget(ctrl_box)
 
         # 聚焦模式控件（默认隐藏）
@@ -2352,6 +3085,24 @@ class ListReplayUI(QMainWindow):
         self._chart_btn.setVisible(False)
         self._chart_btn.clicked.connect(self._toggle_charts)
         lo.addWidget(self._chart_btn)
+
+        # ── 仪表盘指标（仿真模式） ──
+        if self._simulation_mode:
+            monitor_box = QGroupBox("Monitor")
+            self._monitor_box = monitor_box
+            mon_layout = QVBoxLayout(monitor_box)
+            self._util_label = QLabel("Utilization: 0.0%")
+            self._active_pods_label = QLabel("Active Pods: 0")
+            self._deliveries_label = QLabel("Est. Deliveries: 0")
+            self._displacement_label = QLabel("Avg Movement: 0.00")
+            self._status_dist_label = QLabel("IDLE: 0")
+            self._status_dist_label.setWordWrap(True)
+            for lbl in [self._util_label, self._active_pods_label,
+                        self._deliveries_label, self._displacement_label,
+                        self._status_dist_label]:
+                lbl.setStyleSheet("font-size: 12px;")
+                mon_layout.addWidget(lbl)
+            lo.addWidget(monitor_box)
 
         lo.addStretch()
 
@@ -2382,13 +3133,22 @@ class ListReplayUI(QMainWindow):
         for i, data in enumerate(self._datasets):
             card = _TrajectoryCard(
                 index=i, data=data, label=self._labels[i],
-                night_mode=self._night_mode, on_click=self._focus_on,
+                night_mode=self._night_mode,
+                simulation_mode=self._simulation_mode,
+                on_click=self._focus_on,
             )
             self._cards.append(card)
             scroll_layout.addWidget(card)
+
         scroll_layout.addStretch()
         self._scroll_area.setWidget(scroll_content)
-        self._right_splitter.addWidget(self._scroll_area)
+
+        # Tab widget: Trajectories + Dashboard
+        self._tab_widget = QTabWidget()
+        self._tab_widget.addTab(self._scroll_area, "\U0001f4cb  Trajectories")
+        self._dashboard = _DashboardPanel(night_mode=self._night_mode)
+        self._tab_widget.addTab(self._dashboard, "\U0001f4ca  Dashboard")
+        self._right_splitter.addWidget(self._tab_widget)
 
         self._panda_container = QWidget()
         self._panda_container.setSizePolicy(
@@ -2472,7 +3232,8 @@ class ListReplayUI(QMainWindow):
 
         fig = plt.figure(figsize=(14, 3.5), facecolor=bg)
         self._chart_fig = fig
-        axes = fig.subplots(1, 2)
+        n_charts = 3 if self._simulation_mode else 2
+        axes = fig.subplots(1, n_charts)
         self._chart_axes = axes
         for ax in axes:
             ax.set_facecolor(ax_bg)
@@ -2517,8 +3278,13 @@ class ListReplayUI(QMainWindow):
             for sp in ax.spines.values():
                 sp.set_color(self._chart_spine_clr)
 
-        self._draw_density(self._chart_axes[0])
-        self._draw_timeline(self._chart_axes[1])
+        if self._simulation_mode:
+            self._draw_timeline(self._chart_axes[0])
+            self._draw_density(self._chart_axes[1])
+            self._draw_estimated_throughput(self._chart_axes[2])
+        else:
+            self._draw_density(self._chart_axes[0])
+            self._draw_timeline(self._chart_axes[1])
         self._chart_fig.tight_layout(pad=1.5)
         self._charts_canvas.draw_idle()
 
@@ -2560,6 +3326,30 @@ class ListReplayUI(QMainWindow):
                   labelcolor=self._chart_tick_clr)
 
     # ── 聚焦 / 取消聚焦 ──────────────────────────────────────────
+
+
+    def _draw_estimated_throughput(self, ax):
+        idx = self._focused_index if self._focused_index is not None else 0
+        m = self._last_metrics_list[idx] if self._last_metrics_list else {}
+        history = m.get("delivery_history", [])
+        if not history:
+            return
+        ticks = list(range(len(history)))
+        ax.fill_between(ticks, history, alpha=0.15, color="#2ecc71")
+        ax.plot(ticks, history, color="#2ecc71", linewidth=2)
+        current = history[-1] if history else 0
+        rw = self._replay_worlds[idx]
+        tick = rw.tick or 1
+        rate = current / max(tick, 1)
+        ax.text(0.98, 0.92, f"Deliveries: {current}\nRate: {rate:.2f}/tick",
+                transform=ax.transAxes, ha="right", va="top",
+                fontsize=8, color="#2ecc71", fontfamily="monospace",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor=self._chart_ax_bg,
+                          edgecolor="#2ecc71", alpha=0.8))
+        ax.set_xlabel("Tick", color=self._chart_tick_clr, fontsize=8)
+        ax.set_ylabel("Est. Deliveries", color=self._chart_tick_clr, fontsize=8)
+        ax.set_title("Estimated Throughput", color=self._chart_title_clr,
+                      fontsize=10, pad=6)
 
     def _focus_on(self, index: int):
         self._focused_index = index
@@ -2627,6 +3417,66 @@ class ListReplayUI(QMainWindow):
         self.setWindowTitle(
             f"MAS-RMFS  —  List Replay ({n} trajectories)")
 
+    def _set_sim_speed(self, fps: int, step: int, label: str):
+        self._frame_interval = 1.0 / fps
+        self._speed = step
+        self._sim_speed_label.setText(f"Speed: {label}")
+        self._fps_slider.setValue(fps)
+        self._speed_slider.setValue(step)
+
+    def _compute_aggregated_metrics(self) -> dict:
+        valid = [m for m in self._last_metrics_list if m]
+        if not valid:
+            return {}
+        total_agents = sum(m.get('num_agents', 0) for m in valid)
+        if total_agents == 0:
+            return {}
+        util = sum(m['utilization'] * m['num_agents'] for m in valid) / total_agents
+        deliveries = sum(m.get('cumulative_deliveries', 0) for m in valid)
+        disp = sum(m.get('avg_displacement', 0) for m in valid) / len(valid)
+        active = sum(m.get('active_pods', 0) for m in valid)
+        total_pods = sum(m.get('total_pods', 0) for m in valid)
+        merged_status: dict[str, int] = {}
+        for m in valid:
+            for s, cnt in m.get('status_counts', {}).items():
+                merged_status[s] = merged_status.get(s, 0) + cnt
+        return {
+            'utilization': util,
+            'cumulative_deliveries': deliveries,
+            'avg_displacement': disp,
+            'active_pods': active,
+            'total_pods': total_pods,
+            'status_counts': merged_status,
+            'num_agents': total_agents,
+        }
+
+    def _update_metrics_display(self):
+        if not self._simulation_mode or not self._last_metrics:
+            return
+        n = len(self._datasets)
+        focused = self._focused_index
+        if focused is not None:
+            self._monitor_box.setTitle(
+                f"Monitor [{focused}] {self._labels[focused]}")
+        else:
+            self._monitor_box.setTitle(f"Monitor (All {n})")
+        m = self._last_metrics
+        self._util_label.setText(f"Utilization: {m['utilization']:.1f}%")
+        self._active_pods_label.setText(
+            f"Active Pods: {m['active_pods']} / {m.get('total_pods', '?')}")
+        self._deliveries_label.setText(
+            f"Est. Deliveries: {m['cumulative_deliveries']}")
+        self._displacement_label.setText(
+            f"Avg Movement: {m['avg_displacement']:.2f}")
+        parts = []
+        for s in _STATUS_LABELS:
+            cnt = m['status_counts'].get(s, 0)
+            if cnt > 0:
+                parts.append(f"{s}: {cnt}")
+        self._status_dist_label.setText(
+            " | ".join(parts) if parts else "All IDLE")
+
+
     def _toggle_charts(self):
         self._chart_visible = not self._chart_visible
         if self._chart_visible:
@@ -2658,8 +3508,11 @@ class ListReplayUI(QMainWindow):
             status_counts[s] = status_counts.get(s, 0) + 1
             if agent.get("pod") is not None:
                 carrying += 1
+        m = self._last_metrics_list[index] if self._last_metrics_list else {}
         self._cards[index].update_metrics(
-            frame_idx, rw.total_frames, status_counts, carrying)
+            frame_idx, rw.total_frames, status_counts, carrying,
+            utilization=m.get('utilization') if m else None,
+            deliveries=m.get('cumulative_deliveries') if m else None)
 
     def _update_all_cards(self):
         for i in range(len(self._datasets)):
@@ -2695,6 +3548,18 @@ class ListReplayUI(QMainWindow):
                 for rw in self._replay_worlds:
                     rw.set_frame(min(new_frame, rw.total_frames - 1))
             self._last_advance_time = now
+
+            # 计算仪表盘指标
+            if self._simulation_mode:
+                for i, rw in enumerate(self._replay_worlds):
+                    if self._current_frame < rw.total_frames:
+                        self._last_metrics_list[i] = self._metrics_computers[i].compute(rw.current_frame_index)
+                if self._focused_index is not None:
+                    self._last_metrics = self._last_metrics_list[self._focused_index]
+                else:
+                    self._last_metrics = self._compute_aggregated_metrics()
+                self._update_metrics_display()
+                self._dashboard.update(self._last_metrics_list, self._labels)
 
         # 聚焦模式：驱动 Panda3D
         if self._focused_index is not None and self._viz is not None and self._viz._initialised:
@@ -2733,10 +3598,16 @@ class ListReplayUI(QMainWindow):
         if self._focused_index is not None:
             rw = self._replay_worlds[self._focused_index]
             idx = rw.current_frame_index
-            self._frame_label.setText(f"Frame: {idx} / {rw.total_frames - 1}")
+            if self._simulation_mode:
+                self._frame_label.setText(f"Tick: {self._current_frame}")
+            else:
+                self._frame_label.setText(f"Frame: {idx} / {rw.total_frames - 1}")
         else:
             idx = self._current_frame
-            self._frame_label.setText(f"Frame: {idx} / {self._max_frames - 1}")
+            if self._simulation_mode:
+                self._frame_label.setText(f"Tick: {self._current_frame}")
+            else:
+                self._frame_label.setText(f"Frame: {idx} / {self._max_frames - 1}")
         self._frame_slider.blockSignals(True)
         self._frame_slider.setValue(idx)
         self._frame_slider.blockSignals(False)
@@ -2758,6 +3629,10 @@ class ListReplayUI(QMainWindow):
             else:
                 if self._current_frame >= self._max_frames - 1:
                     self._current_frame = 0
+                if self._simulation_mode:
+                    for mc in self._metrics_computers:
+                        mc.reset()
+                    self._last_metrics_list = [{} for _ in self._datasets]
                     for rw in self._replay_worlds:
                         rw.set_frame(0)
             self._play_btn.setText("⏸  Pause")

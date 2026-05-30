@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(F:/Anaconda3/envs/multi_robot/python.exe -c ' *)"
+      "Bash(F:/Anaconda3/envs/multi_robot/python.exe -c ' *)",
+      "Bash(Get-ChildItem -Path \"F:\\\\MAS_RMFS\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(python *)",
+      "PowerShell(Remove-Item *)"
     ]
   }
 }

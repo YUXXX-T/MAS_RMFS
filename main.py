@@ -98,6 +98,11 @@ def main():
         default="",
         help="多轨迹回放的网格布局，如 '2x1'、'1x2'、'2x2'。不指定则自动计算。",
     )
+    parser.add_argument(
+        "--show-replay-controls",
+        action="store_true",
+        help="在回放模式下显示调试用回放控件（帧滑块、FPS、步长等）。默认隐藏，以仿真风格呈现。",
+    )
 
     args = parser.parse_args()
 
@@ -158,7 +163,8 @@ def main():
                 view_mode="2d", use_gpu=False, night_mode=True,
             )
             ui = ReplayUI(data=datasets[0], visualizer=visualizer,
-                          night_mode=True, initial_fps=args.replay_fps)
+                          night_mode=True, initial_fps=args.replay_fps,
+                          simulation_mode=not args.show_replay_controls)
             ui.run()
         elif replay_config.mode == "list":
             # 列表模式
@@ -170,6 +176,7 @@ def main():
                 labels=labels,
                 night_mode=True,
                 initial_fps=args.replay_fps,
+                simulation_mode=not args.show_replay_controls,
             )
             ui.run()
         else:
@@ -187,6 +194,7 @@ def main():
                 visualizer=visualizer,
                 night_mode=True,
                 initial_fps=args.replay_fps,
+                simulation_mode=not args.show_replay_controls,
             )
             ui.run()
         return
