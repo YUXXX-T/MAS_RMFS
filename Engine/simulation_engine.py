@@ -363,6 +363,8 @@ class SimulationEngine:
 
                 # --- Start countdown ---
                 if required_wait > 0:
+                    if active_task.task_type == TaskType.DELIVER:
+                        agent.status = AgentStatus.DELIVERING
                     agent.wait_ticks = required_wait
                     self.logger.info(
                         f"[Tick {tick}] Agent #{agent.agent_id} waiting "
@@ -385,6 +387,7 @@ class SimulationEngine:
                 agent.clear_path()
 
             elif active_task.task_type == TaskType.DELIVER:
+                agent.status = AgentStatus.DELIVERING
                 pod = self.world.pod_state.get_pod(active_task.pod_id)
                 if pod:
                     self.logger.info(

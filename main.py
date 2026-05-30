@@ -77,6 +77,12 @@ def main():
         default=0,
         help="最大运行 tick 数，到达后自动停止仿真。0 表示无限制（默认）。",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="随机数种子，用于复现或区分不同仿真轨迹。",
+    )
 
     # --- 轨迹回放参数 ---
     parser.add_argument(
@@ -202,6 +208,13 @@ def main():
     # ═══════════════════════════════════════════════════════════════
     # 正常仿真模式
     # ═══════════════════════════════════════════════════════════════
+
+    # --- 设置随机种子 ---
+    if args.seed is not None:
+        import random
+        import numpy as np
+        random.seed(args.seed)
+        np.random.seed(args.seed)
 
     # --- 加载配置 ---
     logger = SimLogger("Main")

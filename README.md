@@ -452,6 +452,8 @@ python main.py --record --max-ticks 1000
 
 # 录制 + 实时可视化（可同时使用）
 python main.py --p3d --record
+
+& f:/Anaconda3/envs/multi_robot/python.exe f:/MAS_RMFS/main.py --record --max-ticks 1000 --record-output ./TrajectoryRecord/test/T_seed52_7.json.gz --seed 52
 ```
 
 录制参数：
@@ -484,6 +486,7 @@ python main.py --replay a.traj.json.gz b.traj.json.gz c.traj.json.gz --replay-la
 python main.py --replay f1.traj.json.gz f2.traj.json.gz f3.traj.json.gz f4.traj.json.gz --replay-layout 2x2
 & f:/Anaconda3/envs/multi_robot/python.exe f:/MAS_RMFS/main.py --replay .\TrajectoryRecord\test\Trajectory_first.json.gz .\TrajectoryRecord\test\Trajectory_second.json.gz .\TrajectoryRecord\test\Trajectory_third.json.gz .\TrajectoryRecord\test\Trajectory_fourth.json.gz .\TrajectoryRecord\test\Trajectory_fifth.json.gz .\TrajectoryRecord\test\Trajectory_sixth.json.gz .\TrajectoryRecord\test\Trajectory_seventh.json.gz .\TrajectoryRecord\test\Trajectory_eighth.json.gz .\TrajectoryRecord\test\Trajectory_ninth.json.gz .\TrajectoryRecord\test\Trajectory_tenth.json.gz --replay-fps 5
 
+& f:/Anaconda3/envs/multi_robot/python.exe f:/MAS_RMFS/main.py --replay .\TrajectoryRecord\test\T_seed20_1.json.gz .\TrajectoryRecord\test\T_seed22_2.json.gz .\TrajectoryRecord\test\T_seed25_3.json.gz .\TrajectoryRecord\test\T_seed31_4.json.gz .\TrajectoryRecord\test\T_seed39_5.json.gz.\TrajectoryRecord\test\T_seed36_6.json.gz .\TrajectoryRecord\test\T_seed52_7.json.gz .\TrajectoryRecord\test\T_seed56_8.json.gz .\TrajectoryRecord\test\T_seed73_9.json.gz .\TrajectoryRecord\test\T_seed70_10.json.gz --replay-fps 5
 ```
 
 回放参数：
