@@ -70,6 +70,11 @@ _DARK_PALETTE = {
     "text":     LVecBase4f(0.90, 0.90, 0.90, 1),
     "gizmo_bg": LVecBase4f(0.06, 0.06, 0.10, 1),
     "grid_line": (0.25, 0.25, 0.40, 0.4),
+    "zone_queue":   LVecBase4f(0.55, 0.35, 0.12, 1),
+    "zone_buffer":  LVecBase4f(0.45, 0.25, 0.50, 1),
+    "zone_service": LVecBase4f(0.70, 0.18, 0.22, 1),
+    "zone_exit":    LVecBase4f(0.20, 0.55, 0.35, 1),
+    "zone_entry":   LVecBase4f(0.18, 0.35, 0.60, 1),
 }
 
 _LIGHT_PALETTE = {
@@ -83,6 +88,11 @@ _LIGHT_PALETTE = {
     "text":     LVecBase4f(0.15, 0.15, 0.15, 1),
     "gizmo_bg": LVecBase4f(0.88, 0.88, 0.92, 1),
     "grid_line": (0.60, 0.60, 0.70, 0.5),
+    "zone_queue":   LVecBase4f(0.85, 0.65, 0.30, 1),
+    "zone_buffer":  LVecBase4f(0.72, 0.45, 0.75, 1),
+    "zone_service": LVecBase4f(0.90, 0.30, 0.35, 1),
+    "zone_exit":    LVecBase4f(0.30, 0.75, 0.45, 1),
+    "zone_entry":   LVecBase4f(0.30, 0.55, 0.85, 1),
 }
 
 # Robot colours (tab10-like) — shared by both themes
@@ -642,6 +652,16 @@ class Panda3DVisualizer(BaseVisualizer):
                     clr = self._pal["station"]
                 elif cell == CellType.POD_HOME:
                     clr = self._pal["pod_home"]
+                elif cell == CellType.STATION_QUEUE:
+                    clr = self._pal["zone_queue"]
+                elif cell == CellType.STATION_BUFFER:
+                    clr = self._pal["zone_buffer"]
+                elif cell == CellType.STATION_SERVICE:
+                    clr = self._pal["zone_service"]
+                elif cell == CellType.STATION_EXIT:
+                    clr = self._pal["zone_exit"]
+                elif cell == CellType.STATION_ENTRY:
+                    clr = self._pal["zone_entry"]
                 else:
                     clr = self._pal["free"]
                 np = parent.attachNewNode(cm.generate())
@@ -678,6 +698,16 @@ class Panda3DVisualizer(BaseVisualizer):
                         np.setColor(self._pal["station"])
                     elif cell == CellType.POD_HOME:
                         np.setColor(self._pal["pod_home"])
+                    elif cell == CellType.STATION_QUEUE:
+                        np.setColor(self._pal["zone_queue"])
+                    elif cell == CellType.STATION_BUFFER:
+                        np.setColor(self._pal["zone_buffer"])
+                    elif cell == CellType.STATION_SERVICE:
+                        np.setColor(self._pal["zone_service"])
+                    elif cell == CellType.STATION_EXIT:
+                        np.setColor(self._pal["zone_exit"])
+                    elif cell == CellType.STATION_ENTRY:
+                        np.setColor(self._pal["zone_entry"])
                     else:
                         np.setColor(self._pal["free"])
 
@@ -1499,6 +1529,16 @@ class MultiPanda3DReplayVisualizer:
                     clr = self._pal["station"]
                 elif cell == CellType.POD_HOME:
                     clr = self._pal["pod_home"]
+                elif cell == CellType.STATION_QUEUE:
+                    clr = self._pal["zone_queue"]
+                elif cell == CellType.STATION_BUFFER:
+                    clr = self._pal["zone_buffer"]
+                elif cell == CellType.STATION_SERVICE:
+                    clr = self._pal["zone_service"]
+                elif cell == CellType.STATION_EXIT:
+                    clr = self._pal["zone_exit"]
+                elif cell == CellType.STATION_ENTRY:
+                    clr = self._pal["zone_entry"]
                 else:
                     clr = self._pal["free"]
                 np = static_root.attachNewNode(cm.generate())

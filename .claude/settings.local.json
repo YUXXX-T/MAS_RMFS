@@ -5,7 +5,14 @@
       "Bash(Get-ChildItem -Path \"F:\\\\MAS_RMFS\" -Force)",
       "Bash(Select-Object Name, PSIsContainer)",
       "Bash(python *)",
-      "PowerShell(Remove-Item *)"
+      "PowerShell(Remove-Item *)",
+      "Bash(Get-ChildItem *)",
+      "Bash(Select-Object Name)",
+      "Bash(conda activate *)",
+      "Bash(Select-Object -Last 30)",
+      "PowerShell(conda activate *)",
+      "Bash(Select-String -Pattern \"\\(SUMMARY|Total ticks|Total orders|Completed orders|In-progress|Pending|CONFLICT|IDLE on handoff|stuck EXITING|ONCOMING\\)\")",
+      "Bash(Select-Object -First 30)"
     ]
   }
 }

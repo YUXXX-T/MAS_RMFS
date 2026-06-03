@@ -290,6 +290,46 @@ Order(pods=[A, B], station=S)
 2. **DELIVER（配送）**：机器人搬运货架到工作站 → 暂停 `station_process_duration` tick → 完成配送
 3. **RETURN（归还）**：机器人将货架搬回原位 → 暂停 `dropoff_duration` tick → 放下货架
 
+### 🏭 工作站队列系统（Station Queue）
+
+工作站采用 **W/SVC 合并模型**：station cell 同时作为 service cell，agent 直接进入工作站格子进行交付处理。
+
+```
+队列流程（以右边缘 station 14 为例）：
+
+row28: .  .  .  .  .  EX        ← exit（公共 FREE 格，释放出口）
+row29: .  EN Q2 Q1 Q0 W/SVC     ← agent 从 EN 进入，经 cascade 依次前移至 W/SVC
+cols : 34 35 36 37 38 39
+```
+
+**核心概念：**
+
+| 概念 | 说明 |
+|------|------|
+| **W/SVC（合并）** | station cell = service cell。agent 在此处进行 DELIVER 处理 |
+| **Q0–Q2** | 队列槽位。agent 通过 cascade teleport 逐步前移 |
+| **Entry** | 公共 FREE 格。全局 planner 将 CARRYING agent 路径规划到此处 |
+| **Exit** | 公共 FREE 格。DELIVER 完成后 agent 从 W/SVC 释放到此处 |
+| **Buffer** | 可选的缓冲槽位，位于队尾的垂直方向 |
+| **Cascade** | 每 tick 自动推进：空出的前方槽位由后方 agent teleport 填入 |
+
+**Zone cell 标记：** Q0–Q2、Buffer 被标记为非可行走的 zone cell（`STATION_QUEUE` / `STATION_BUFFER`），全局 planner 不会规划经过这些格子。Entry 和 Exit 保持 `FREE`，作为 queue 系统和公共走廊的交接点。
+
+**Handoff 保护（selective blocking）：** `extra_blocked` 仅阻塞正在被使用的 station 的 handoff cell（有 EXITING agent 或 CARRYING agent 前往该 station），空闲 station 的 entry/exit 不阻塞，避免走廊分隔。
+
+**显式队列配置（L-shape）：** 对于靠近 pod storage 区域的 station（如 station 1/2/5/6），队列采用 L 形布局避开 POD_HOME 格子：
+
+```
+Station 1 (0,7) — L 形队列：
+col:  5    6    7
+row0:      EX   W/SVC
+row1:           Q0
+row2: BUF  Q2   Q1
+row3:      EN
+```
+
+**Auto-layout：** 未配置显式队列的 station 由 `_auto_layout()` 根据 station 在地图边缘的位置自动生成队列方向和槽位坐标。
+
 ---
 
 ## 🧩 如何集成自定义算法
@@ -748,6 +788,20 @@ class MyEncoder(BaseObservationEncoder):
 
 渲染端未来可以换成 任何引擎（Panda3D、Godot、甚至 C++ 自定义），只要它能读 ZeroMQ 消息。
 ```
+🔒 **更保守的 exit handoff blocking 策略**
+```
+当前 selective blocking 仅在 station 有 EXITING agent 时 block exit cell。
+由于 release_to_exit() 是 teleport（不经过 reservation table），存在以下风险：
+其他 agent 在 station 空闲时规划了经过 exit cell 的路径，之后 station 内 agent 完成 DELIVER
+并 teleport 到 exit → 虽然 release_to_exit() 有 occupied check 不会碰撞，但会造成 backpressure。
+
+建议修改：exit 的 block 条件放宽为 station 内有任何 agent（QUEUING / DELIVERING / EXITING）
+就 block exit，而 entry 保持 selective（仅在有 CARRYING agent 前往时 block）。
+
+涉及文件：Engine/simulation_engine.py — _plan_and_activate() 中 active_station_ids 的构建逻辑。
+需新增：遍历 station 内部 slot，检查是否有 agent 占据任意 slot（service / queue / buffer）。
+```
+
 🛒 **Inventory model and Inventory lookup policy**
 ```
 📦 current:

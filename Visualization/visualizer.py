@@ -60,6 +60,16 @@ class TerminalVisualizer(BaseVisualizer):
                     grid[r][c] = "S"
                 elif cell == CellType.POD_HOME:
                     grid[r][c] = "P"
+                elif cell == CellType.STATION_QUEUE:
+                    grid[r][c] = "Q"
+                elif cell == CellType.STATION_BUFFER:
+                    grid[r][c] = "B"
+                elif cell == CellType.STATION_SERVICE:
+                    grid[r][c] = "V"
+                elif cell == CellType.STATION_EXIT:
+                    grid[r][c] = "X"
+                elif cell == CellType.STATION_ENTRY:
+                    grid[r][c] = "E"
 
         # Mark pods not at home (being carried or displaced)
         for pod in world_state.pod_state.pods.values():
@@ -108,6 +118,8 @@ class MatplotlibVisualizer(BaseVisualizer):
         "DELIVERING": 3,
         "RETURNING": 4,
         "MOVING": 5,
+        "QUEUING": 6,
+        "EXITING": 7,
     }
 
     def __init__(self, night_mode: bool = True):
@@ -132,6 +144,11 @@ class MatplotlibVisualizer(BaseVisualizer):
             self._grid_base = [0.09, 0.09, 0.16]
             self._grid_obs = [0.25, 0.25, 0.30]
             self._grid_pod_home = [0.10, 0.18, 0.20]
+            self._grid_zone_queue = [0.55, 0.35, 0.12]
+            self._grid_zone_buffer = [0.45, 0.25, 0.50]
+            self._grid_zone_service = [0.70, 0.18, 0.22]
+            self._grid_zone_exit = [0.20, 0.55, 0.35]
+            self._grid_zone_entry = [0.18, 0.35, 0.60]
             self._grid_line_clr = "#333355"
             self._label_bg = "#16162a"
             self._idle_clr = "#1a1a2e"
@@ -144,6 +161,11 @@ class MatplotlibVisualizer(BaseVisualizer):
             self._grid_base = [0.92, 0.92, 0.95]
             self._grid_obs = [0.60, 0.60, 0.65]
             self._grid_pod_home = [0.80, 0.90, 0.92]
+            self._grid_zone_queue = [0.85, 0.65, 0.30]
+            self._grid_zone_buffer = [0.72, 0.45, 0.75]
+            self._grid_zone_service = [0.90, 0.30, 0.35]
+            self._grid_zone_exit = [0.30, 0.75, 0.45]
+            self._grid_zone_entry = [0.30, 0.55, 0.85]
             self._grid_line_clr = "#bbbbcc"
             self._label_bg = "#ffffff"
             self._idle_clr = "#dddde8"
@@ -164,7 +186,9 @@ class MatplotlibVisualizer(BaseVisualizer):
              "#f0a500",       # CARRYING    – gold
              "#e07c24",       # DELIVERING  – orange
              "#7b2cbf",       # RETURNING   – purple
-             "#2ec4b6"]       # MOVING      – teal
+             "#2ec4b6",       # MOVING      – teal
+             "#f59e0b",       # QUEUING     – amber
+             "#6b7280"]       # EXITING     – gray
         )
         self._timeline_labels = list(self._STATUS_CODES.keys())
 
@@ -253,6 +277,16 @@ class MatplotlibVisualizer(BaseVisualizer):
                     grid[r, c] = self._grid_obs
                 elif cell == CellType.POD_HOME:
                     grid[r, c] = self._grid_pod_home
+                elif cell == CellType.STATION_QUEUE:
+                    grid[r, c] = self._grid_zone_queue
+                elif cell == CellType.STATION_BUFFER:
+                    grid[r, c] = self._grid_zone_buffer
+                elif cell == CellType.STATION_SERVICE:
+                    grid[r, c] = self._grid_zone_service
+                elif cell == CellType.STATION_EXIT:
+                    grid[r, c] = self._grid_zone_exit
+                elif cell == CellType.STATION_ENTRY:
+                    grid[r, c] = self._grid_zone_entry
 
         ax.imshow(grid, origin="upper", aspect="equal")
 

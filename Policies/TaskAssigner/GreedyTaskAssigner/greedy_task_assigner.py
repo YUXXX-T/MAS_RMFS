@@ -109,10 +109,14 @@ class GreedyTaskAssigner(BaseTaskAssigner):
                 )
                 agent = idle_agents[0]
 
-                # Get station position
-                station_pos = world_state.map_state.station_positions.get(
+                # Get station service position
+                station_pos = world_state.station_state.get_service_position(
                     order.station_id
                 )
+                if station_pos is None:
+                    station_pos = world_state.map_state.station_positions.get(
+                        order.station_id
+                    )
                 if station_pos is None:
                     continue
 
@@ -127,7 +131,7 @@ class GreedyTaskAssigner(BaseTaskAssigner):
                 pick_task.agent_id = agent.agent_id
                 pick_task.status = TaskStatus.ASSIGNED
 
-                # Create DELIVER task: carry pod to station
+                # Create DELIVER task: carry pod to station service slot
                 deliver_task = Task(
                     task_type=TaskType.DELIVER,
                     order_id=order.order_id,
@@ -137,11 +141,14 @@ class GreedyTaskAssigner(BaseTaskAssigner):
                 )
                 deliver_task.agent_id = agent.agent_id
                 deliver_task.status = TaskStatus.ASSIGNED
+                deliver_task.station_id = order.station_id
 
                 # Create RETURN task: return pod to designated location
+                exit_pos = world_state.station_state.get_exit_position(order.station_id)
+                return_source = exit_pos or station_pos
                 if self.pod_return_planner is not None:
                     return_dest = self.pod_return_planner.plan_return(
-                        pod, station_pos, world_state
+                        pod, return_source, world_state
                     )
                 else:
                     return_dest = pod.home_position
@@ -150,11 +157,12 @@ class GreedyTaskAssigner(BaseTaskAssigner):
                     task_type=TaskType.RETURN,
                     order_id=order.order_id,
                     pod_id=pod_id,
-                    source=station_pos,
+                    source=return_source,
                     destination=return_dest,
                 )
                 return_task.agent_id = agent.agent_id
                 return_task.status = TaskStatus.ASSIGNED
+                return_task.station_id = order.station_id
 
                 # Register tasks
                 world_state.task_state.add_task(pick_task)
@@ -242,10 +250,14 @@ class GreedyTaskAssigner(BaseTaskAssigner):
             )
             agent = idle_agents[0]
 
-            # Get station position
-            station_pos = world_state.map_state.station_positions.get(
+            # Get station service position
+            station_pos = world_state.station_state.get_service_position(
                 order.station_id
             )
+            if station_pos is None:
+                station_pos = world_state.map_state.station_positions.get(
+                    order.station_id
+                )
             if station_pos is None:
                 continue
 
@@ -271,10 +283,13 @@ class GreedyTaskAssigner(BaseTaskAssigner):
                 )
                 deliver_task.agent_id = agent.agent_id
                 deliver_task.status = TaskStatus.ASSIGNED
+                deliver_task.station_id = order.station_id
 
+                exit_pos = world_state.station_state.get_exit_position(order.station_id)
+                return_source = exit_pos or station_pos
                 if self.pod_return_planner is not None:
                     return_dest = self.pod_return_planner.plan_return(
-                        pod, station_pos, world_state
+                        pod, return_source, world_state
                     )
                 else:
                     return_dest = pod.home_position
@@ -283,11 +298,12 @@ class GreedyTaskAssigner(BaseTaskAssigner):
                     task_type=TaskType.RETURN,
                     order_id=order.order_id,
                     pod_id=pod.pod_id,
-                    source=station_pos,
+                    source=return_source,
                     destination=return_dest,
                 )
                 return_task.agent_id = agent.agent_id
                 return_task.status = TaskStatus.ASSIGNED
+                return_task.station_id = order.station_id
 
                 world_state.task_state.add_task(pick_task)
                 world_state.task_state.add_task(deliver_task)

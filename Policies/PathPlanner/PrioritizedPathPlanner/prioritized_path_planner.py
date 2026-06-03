@@ -24,6 +24,7 @@ from typing import List, Set, Tuple, Dict
 
 import numpy as np
 from Policies.PathPlanner.base_path_planner import BasePathPlanner
+from WorldState.agent_state import AgentStatus
 
 # Try to import Cython-accelerated A* core
 try:
@@ -99,6 +100,7 @@ class PrioritizedPathPlanner(BasePathPlanner):
         agent,
         goal: Tuple[int, int],
         world_state,
+        extra_blocked=None,
     ) -> List[Tuple[int, int]]:
         """
         Compute a collision-free path using space-time A*.
@@ -133,21 +135,19 @@ class PrioritizedPathPlanner(BasePathPlanner):
                 for pod in world_state.pod_state.pods.values()
                 if not pod.is_carried
             }
-            # Cache positions of non-moving agents (idle OR stuck without path)
-            # They won't move, so treat as obstacles instead of reservations
+            _ZONE_STATUSES = (AgentStatus.QUEUING, AgentStatus.DELIVERING, AgentStatus.EXITING)
             self._idle_agent_positions = {
                 ag.position
                 for ag in world_state.agents
                 if not ag.has_path and not ag.is_waiting
+                and ag.status not in _ZONE_STATUSES
             }
-            # Cache walkable grid for Cython (only build once)
             if _USE_CYTHON and self._walkable is None:
                 ms = world_state.map_state
-                from WorldState.map_state import CellType
                 w = np.zeros((ms.rows, ms.cols), dtype=np.uint8)
                 for r in range(ms.rows):
                     for c in range(ms.cols):
-                        if ms.grid[r][c] != CellType.OBSTACLE:
+                        if ms.is_walkable(r, c):
                             w[r, c] = 1
                 self._walkable = w
 
@@ -158,12 +158,15 @@ class PrioritizedPathPlanner(BasePathPlanner):
         map_state = world_state.map_state
 
         # Build per-agent static_blocked:
-        #   pods (if carrying) + idle agents (excluding self) - goal
+        #   pods (if carrying) + idle agents (excluding self) + extra_blocked - goal
         idle_others = self._idle_agent_positions - {start}
         if agent.carried_pod_id is not None:
-            static_blocked = (self._static_blocked | idle_others) - {goal}
+            static_blocked = self._static_blocked | idle_others
         else:
-            static_blocked = idle_others  # non-carrying agents can walk over pods
+            static_blocked = idle_others
+        if extra_blocked:
+            static_blocked = static_blocked | extra_blocked
+        static_blocked = static_blocked - {goal}
 
         # Phase 1: Spatial BFS pre-check
         spatial_dist = self._spatial_bfs(start, goal, map_state, static_blocked)
@@ -192,8 +195,10 @@ class PrioritizedPathPlanner(BasePathPlanner):
         planned future positions, including agents waiting at destinations.
         在预留表中填入所有智能体的当前位置及计划的未来位置，包括正在目的地等待的智能体。
         """
+        _ZONE_STATUSES = (AgentStatus.QUEUING, AgentStatus.DELIVERING, AgentStatus.EXITING)
         for agent in world_state.agents:
-            # Skip non-moving agents — they are treated as static obstacles
+            if agent.status in _ZONE_STATUSES:
+                continue
             if not agent.has_path and not agent.is_waiting:
                 continue
 
@@ -202,10 +207,6 @@ class PrioritizedPathPlanner(BasePathPlanner):
             self._vertex_res.add((pos[0], pos[1], 0))
 
             if agent.is_waiting:
-                # Agent is parked at this position for wait_ticks more ticks
-                # plus a buffer so new paths don't target this cell too early
-                # 智能体停驻在此位置，并将继续等待 wait_ticks 个时间步
-                # 此外还额外预留了一段缓冲时间，以防止新路径过早地将此单元格选为目标
                 for t in range(1, agent.wait_ticks + 1 + self.goal_reserve):
                     self._vertex_res.add((pos[0], pos[1], t))
 
@@ -216,14 +217,13 @@ class PrioritizedPathPlanner(BasePathPlanner):
                     step = i + 1
                     nxt = agent.path[agent.path_index + i]
                     self._vertex_res.add((nxt[0], nxt[1], step))
-                    # Edge reservation (prevents swaps)
                     self._edge_res.add(
                         (nxt[0], nxt[1], prev[0], prev[1], step)
                     )
                     prev = nxt
-                # Reserve the final position for extra timesteps
                 for extra in range(remaining + 1, remaining + 1 + self.goal_reserve):
                     self._vertex_res.add((prev[0], prev[1], extra))
+
 
     def _reserve_path(
         self,

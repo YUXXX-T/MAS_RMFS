@@ -5,7 +5,7 @@ Abstract base class (interface) for path planning policies.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple, TYPE_CHECKING
+from typing import List, Set, Tuple, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from WorldState.world import WorldState
@@ -26,6 +26,7 @@ class BasePathPlanner(ABC):
         agent: "AgentState",
         goal: Tuple[int, int],
         world_state: "WorldState",
+        extra_blocked: Optional[Set[Tuple[int, int]]] = None,
     ) -> List[Tuple[int, int]]:
         """
         Compute a path from the agent's current position to the goal.

@@ -66,6 +66,7 @@ class Task:
         self.source = source
         self.destination = destination
         self.agent_id: Optional[int] = None
+        self.station_id: Optional[int] = None
         self.status: TaskStatus = TaskStatus.PENDING
 
     def __repr__(self) -> str:

@@ -43,6 +43,8 @@ _STATUS_CODES = {
     "DELIVERING": 3,
     "RETURNING": 4,
     "MOVING": 5,
+    "QUEUING": 6,
+    "EXITING": 7,
 }
 
 _STATUS_LABELS = list(_STATUS_CODES.keys())
@@ -93,6 +95,7 @@ class TrajectoryPlayer:
         self._timeline_cmap = ListedColormap([
             self._idle_clr, "#4361ee", "#f0a500",
             "#e07c24", "#7b2cbf", "#2ec4b6",
+            "#f59e0b", "#6b7280",
         ])
 
         self._robot_cmap = plt.cm.get_cmap("tab10")

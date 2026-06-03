@@ -42,6 +42,7 @@ class AStarPathPlanner(BasePathPlanner):
         agent,
         goal: Tuple[int, int],
         world_state,
+        extra_blocked=None,
     ) -> List[Tuple[int, int]]:
         """
         Compute the shortest path from agent's position to goal using A*.
@@ -74,6 +75,10 @@ class AStarPathPlanner(BasePathPlanner):
                 if not pod.is_carried:
                     pos = pod.current_position
                     blocked.add(pos)
+
+        # Merge extra_blocked (station zones etc.)
+        if extra_blocked:
+            blocked |= extra_blocked
 
         # Never block our own goal
         blocked.discard(goal)

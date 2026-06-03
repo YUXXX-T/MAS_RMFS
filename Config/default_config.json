@@ -124,6 +124,11 @@
         "task_execution_mode": "parallel",
         "max_items_per_sku": 3
     },
+    "station_queue": {
+        "queue_length": 3,
+        "buffer_length": 1,
+        "direction": "auto"
+    },
     "policies": {
         "order_generator": {
             "name": "ZipfOrderGenerator",

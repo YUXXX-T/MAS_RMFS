@@ -15,7 +15,12 @@ class CellType(Enum):
     FREE = auto()
     OBSTACLE = auto()
     STATION = auto()
-    POD_HOME = auto()  # A cell that is a pod's home location
+    POD_HOME = auto()
+    STATION_SERVICE = auto()
+    STATION_QUEUE = auto()
+    STATION_BUFFER = auto()
+    STATION_EXIT = auto()
+    STATION_ENTRY = auto()
 
 
 class MapState:
@@ -74,8 +79,30 @@ class MapState:
     def is_walkable(self, row: int, col: int) -> bool:
         """Check if a cell can be traversed by a robot."""
         if 0 <= row < self.rows and 0 <= col < self.cols:
-            return self.grid[row][col] != CellType.OBSTACLE
+            return self.grid[row][col] not in (
+                CellType.OBSTACLE, CellType.STATION,
+                CellType.STATION_SERVICE, CellType.STATION_QUEUE, CellType.STATION_BUFFER,
+            )
         return False
+
+    def mark_station_zone(self, positions_by_type: dict):
+        """Mark station zone cells on the grid.
+
+        Overwrites existing cell types (including POD_HOME). Any POD_HOME
+        positions that are overwritten are removed from pod_home_positions.
+
+        Parameters
+        ----------
+        positions_by_type : dict[CellType, list[tuple[int,int]]]
+        """
+        pod_home_set = set(self.pod_home_positions)
+        for cell_type, positions in positions_by_type.items():
+            for r, c in positions:
+                if self.in_bounds(r, c):
+                    if (r, c) in pod_home_set:
+                        pod_home_set.discard((r, c))
+                    self.grid[r][c] = cell_type
+        self.pod_home_positions = [p for p in self.pod_home_positions if p in pod_home_set]
 
     def in_bounds(self, row: int, col: int) -> bool:
         """Check if coordinates are within the grid."""

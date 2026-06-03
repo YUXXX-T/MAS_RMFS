@@ -86,14 +86,22 @@ class TaskAssignmentDecoder(BaseActionDecoder):
                 # 没有待处理订单需要此货架，跳过
                 continue
 
-            # 确定目标工作站
-            station_pos = world_state.map_state.station_positions.get(
+            # 确定目标工作站 service position
+            station_pos = world_state.station_state.get_service_position(
                 target_order.station_id
             )
+            if station_pos is None:
+                station_pos = world_state.map_state.station_positions.get(
+                    target_order.station_id
+                )
             if station_pos is None:
                 continue
 
             # 确定归还位置
+            exit_pos = world_state.station_state.get_exit_position(
+                target_order.station_id
+            )
+            return_source = exit_pos or station_pos
             return_pos = pod.home_position
 
             # 创建任务链: PICK → DELIVER → RETURN
@@ -116,21 +124,28 @@ class TaskAssignmentDecoder(BaseActionDecoder):
             )
             deliver_task.agent_id = agent_id
             deliver_task.status = TaskStatus.ASSIGNED
+            deliver_task.station_id = target_order.station_id
 
             return_task = Task(
                 task_type=TaskType.RETURN,
                 order_id=target_order.order_id,
                 pod_id=pod_id,
-                source=station_pos,
+                source=return_source,
                 destination=return_pos,
             )
             return_task.agent_id = agent_id
             return_task.status = TaskStatus.ASSIGNED
+            return_task.station_id = target_order.station_id
 
             # 注册任务
             world_state.task_state.add_task(pick_task)
             world_state.task_state.add_task(deliver_task)
             world_state.task_state.add_task(return_task)
+
+            # 激活智能体
+            from WorldState.agent_state import AgentStatus
+            agent.status = AgentStatus.MOVING_TO_POD
+            agent.assigned_task_id = pick_task.task_id
 
             # 标记订单为进行中
             from WorldState.order_state import OrderStatus

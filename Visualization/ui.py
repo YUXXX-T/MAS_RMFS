@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 _STATUS_CODES = {
     "IDLE": 0, "MOVING_TO_POD": 1, "CARRYING": 2,
     "DELIVERING": 3, "RETURNING": 4, "MOVING": 5,
+    "QUEUING": 6, "EXITING": 7,
 }
 _STATUS_LABELS = list(_STATUS_CODES.keys())
 
@@ -604,6 +605,8 @@ class SimulationUI(QMainWindow):
             "#e07c24",     # DELIVERING
             "#7b2cbf",     # RETURNING
             "#2ec4b6",     # MOVING
+            "#f59e0b",     # QUEUING
+            "#6b7280",     # EXITING
         ])
 
         panel = QWidget()
@@ -668,7 +671,7 @@ class SimulationUI(QMainWindow):
                 mat[a, t] = code
 
         ax.imshow(mat, cmap=self._timeline_cmap, aspect="auto",
-                  origin="upper", vmin=0, vmax=5, interpolation="nearest")
+                  origin="upper", vmin=0, vmax=7, interpolation="nearest")
         ax.set_yticks(range(n_agents))
         ax.set_yticklabels([f"R{i}" for i in range(n_agents)])
         ax.set_xlabel("Tick", color=self._chart_tick_clr, fontsize=8)
@@ -1239,6 +1242,7 @@ class ReplayUI(QMainWindow):
         self._timeline_cmap = ListedColormap([
             idle_clr, "#4361ee", "#f0a500",
             "#e07c24", "#7b2cbf", "#2ec4b6",
+            "#f59e0b", "#6b7280",
         ])
 
         panel = QWidget()
@@ -1322,7 +1326,7 @@ class ReplayUI(QMainWindow):
                     mat[a, t] = code
 
         ax.imshow(mat, cmap=self._timeline_cmap, aspect="auto",
-                  origin="upper", vmin=0, vmax=5, interpolation="nearest")
+                  origin="upper", vmin=0, vmax=7, interpolation="nearest")
 
         # 当前帧指示线
         ax.axvline(n_ticks - 1, color="white", linewidth=0.8, alpha=0.6)
@@ -2004,6 +2008,7 @@ class MultiReplayUI(QMainWindow):
         self._timeline_cmap = ListedColormap([
             idle_clr, "#4361ee", "#f0a500",
             "#e07c24", "#7b2cbf", "#2ec4b6",
+            "#f59e0b", "#6b7280",
         ])
 
         panel = QWidget()
@@ -2092,7 +2097,7 @@ class MultiReplayUI(QMainWindow):
                     mat[a, t] = code
 
         ax.imshow(mat, cmap=self._timeline_cmap, aspect="auto",
-                  origin="upper", vmin=0, vmax=5, interpolation="nearest")
+                  origin="upper", vmin=0, vmax=7, interpolation="nearest")
 
         ax.axvline(n_ticks - 1, color="white", linewidth=0.8, alpha=0.6)
 
@@ -3224,6 +3229,7 @@ class ListReplayUI(QMainWindow):
         self._timeline_cmap = ListedColormap([
             idle_clr, "#4361ee", "#f0a500",
             "#e07c24", "#7b2cbf", "#2ec4b6",
+            "#f59e0b", "#6b7280",
         ])
 
         panel = QWidget()
@@ -3308,7 +3314,7 @@ class ListReplayUI(QMainWindow):
                     mat[a, t] = code
 
         ax.imshow(mat, cmap=self._timeline_cmap, aspect="auto",
-                  origin="upper", vmin=0, vmax=5, interpolation="nearest")
+                  origin="upper", vmin=0, vmax=7, interpolation="nearest")
         ax.axvline(n_ticks - 1, color="white", linewidth=0.8, alpha=0.6)
 
         if n_agents <= 30:

@@ -15,11 +15,25 @@ from typing import List, Tuple, Optional, Dict, Any
 
 
 @dataclass
+class StationQueueConfig:
+    """Configuration for a station's queue zone layout."""
+    service: Optional[Tuple[int, int]] = None
+    queue: Optional[List[Tuple[int, int]]] = None
+    buffer: Optional[List[Tuple[int, int]]] = None
+    entry: Optional[Tuple[int, int]] = None
+    exit: Optional[Tuple[int, int]] = None
+    queue_length: int = 3
+    buffer_length: int = 1
+    direction: str = "auto"
+
+
+@dataclass
 class StationConfig:
     """Configuration for a single workstation."""
     id: int
     row: int
     col: int
+    queue: Optional[StationQueueConfig] = None
 
 
 @dataclass
@@ -177,10 +191,37 @@ def load_config(path: str) -> SimulationConfig:
     map_rows = map_raw.get("rows", 10)
     map_cols = map_raw.get("cols", 10)
     obstacles = [tuple(o) for o in map_raw.get("obstacles", [])]
-    stations = [
-        StationConfig(id=s["id"], row=s["row"], col=s["col"])
-        for s in map_raw.get("stations", [])
-    ]
+    # Parse top-level station_queue defaults
+    sq_defaults_raw = raw.get("station_queue", {})
+    sq_defaults = StationQueueConfig(
+        queue_length=sq_defaults_raw.get("queue_length", 3),
+        buffer_length=sq_defaults_raw.get("buffer_length", 1),
+        direction=sq_defaults_raw.get("direction", "auto"),
+    )
+
+    stations = []
+    for s in map_raw.get("stations", []):
+        sq_raw = s.get("queue", None)
+        if sq_raw is not None:
+            sq = StationQueueConfig(
+                service=tuple(sq_raw["service"]) if "service" in sq_raw else None,
+                queue=[tuple(q) for q in sq_raw["queue"]] if "queue" in sq_raw else None,
+                buffer=[tuple(b) for b in sq_raw["buffer"]] if "buffer" in sq_raw else None,
+                entry=tuple(sq_raw["entry"]) if "entry" in sq_raw else None,
+                exit=tuple(sq_raw["exit"]) if "exit" in sq_raw else None,
+                queue_length=sq_raw.get("queue_length", sq_defaults.queue_length),
+                buffer_length=sq_raw.get("buffer_length", sq_defaults.buffer_length),
+                direction=sq_raw.get("direction", sq_defaults.direction),
+            )
+        else:
+            sq = StationQueueConfig(
+                queue_length=sq_defaults.queue_length,
+                buffer_length=sq_defaults.buffer_length,
+                direction=sq_defaults.direction,
+            )
+        stations.append(StationConfig(
+            id=s["id"], row=s["row"], col=s["col"], queue=sq,
+        ))
 
     # pod_zones: 支持两种格式
     #   1. "pod_zones": [...]          — 显式列出每一个 zone（向后兼容）

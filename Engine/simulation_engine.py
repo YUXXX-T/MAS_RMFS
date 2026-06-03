@@ -182,27 +182,43 @@ class SimulationEngine:
                 f"assigned to Agent #{task.agent_id}"
             )
 
-        # --- Step 3: Plan paths & activate tasks ---
+        # --- Step 3: Station queue cascade ---
+        self.world.station_state.tick(self.world)
+
+        # --- Step 3b: Process station exits (EXITING -> exit_position) ---
+        self._process_station_exits(tick)
+
+        # --- Step 3c: Absorb agents stranded at entry from previous tick ---
+        absorbed_entries = set()
+        self._check_queue_arrivals(tick, absorbed_entries)
+
+        # --- Step 3d: Clear stale DELIVER paths near free entry ---
+        self._clear_stale_entry_paths(tick)
+
+        # --- Step 4: Plan paths & activate tasks ---
         self._plan_and_activate(tick)
 
-        # --- Step 4: Capture pre-move positions & Move agents ---
+        # --- Step 5: Capture pre-move positions & Move agents ---
         prev_positions = {agent.agent_id: agent.position for agent in self.world.agents}
         self._move_agents(tick)
 
-        # --- 步骤 5：检测冲突 (vertex & oncoming/swap) ---
+        # --- Step 6: Check queue arrivals (new arrivals) ---
+        self._check_queue_arrivals(tick, absorbed_entries)
+
+        # --- 步骤 7：检测冲突 (vertex & oncoming/swap) ---
         self._detect_conflicts(tick, prev_positions)
 
-        # --- Step 6: Handle pickups, deliveries, returns ---
+        # --- Step 8: Handle pickups, deliveries, returns ---
         self._handle_actions(tick)
 
-        # --- 步骤 7：检查订单完成 ---
+        # --- Step 9: Check order completion ---
         self._check_order_completion(tick)
 
-        # --- 步骤 8：可视化（可选） ---
+        # --- Step 10: Visualize ---
         if self.visualizer:
             self.visualizer.render(self.world)
 
-        # --- 步骤 9：记录轨迹（可选） ---
+        # --- Step 11: Record trajectory ---
         if self.trajectory_recorder:
             self.trajectory_recorder.snapshot(self.world)
 
@@ -211,56 +227,138 @@ class SimulationEngine:
 
     def _plan_and_activate(self, tick: int):
         """Plan paths for agents that have assigned tasks but no active path."""
+        station_state = self.world.station_state
+
+        active_station_ids = set()
         for agent in self.world.agents:
+            if agent.status == AgentStatus.EXITING:
+                t = self.world.task_state.get_active_task_for_agent(agent.agent_id)
+                if t:
+                    active_station_ids.add(t.station_id)
+            elif agent.status == AgentStatus.CARRYING and not agent.has_path:
+                t = self.world.task_state.get_active_task_for_agent(agent.agent_id)
+                if t and t.task_type == TaskType.DELIVER:
+                    active_station_ids.add(t.station_id)
+
+        handoff_blocked = set()
+        for sq in station_state.stations.values():
+            if sq.station_id not in active_station_ids:
+                continue
+            if sq.entry_position:
+                handoff_blocked.add(sq.entry_position)
+            if sq.exit_position:
+                handoff_blocked.add(sq.exit_position)
+
+        agents_sorted = sorted(
+            self.world.agents,
+            key=lambda a: (0 if a.position in handoff_blocked else 1, a.agent_id),
+        )
+
+        for agent in agents_sorted:
+            if agent.status in (AgentStatus.QUEUING, AgentStatus.DELIVERING,
+                                AgentStatus.EXITING):
+                continue
+            if agent.is_idle and agent.position in handoff_blocked:
+                self.logger.warning(
+                    f"[Tick {tick}] Agent #{agent.agent_id} is IDLE on handoff "
+                    f"cell {agent.position} — may block station exit/entry"
+                )
             if agent.is_idle or agent.is_waiting:
                 continue
 
-            # If agent has no path and no active task, find next assigned task
             active_task = self.world.task_state.get_active_task_for_agent(agent.agent_id)
+
+            # -- DELIVER branch: fully transactional, separate from generic flow --
+            if active_task is None:
+                next_task = self.world.task_state.get_next_task_for_agent(agent.agent_id)
+                if next_task is not None and next_task.task_type == TaskType.DELIVER:
+                    queue = station_state.get_queue(next_task.station_id)
+                    if queue is None or queue.entry_position is None:
+                        continue
+
+                    if not queue.reserve(agent.agent_id):
+                        continue  # station at capacity, defer
+
+                    goal = queue.entry_position
+                    extra_blocked = handoff_blocked - {goal, agent.position}
+                    path = self.path_planner.plan(
+                        agent, goal, self.world, extra_blocked=extra_blocked
+                    )
+                    if not path:
+                        queue.unreserve(agent.agent_id)
+                        self.logger.warning(
+                            f"[Tick {tick}] Agent #{agent.agent_id} could not find "
+                            f"path to entry {goal} for DELIVER"
+                        )
+                        continue  # path failed, keep task ASSIGNED
+
+                    next_task.status = TaskStatus.IN_PROGRESS
+                    agent.status = AgentStatus.CARRYING
+                    agent.assigned_task_id = next_task.task_id
+                    agent.assign_path(path)
+                    self.logger.debug(
+                        f"[Tick {tick}] Agent #{agent.agent_id} DELIVER → "
+                        f"entry {goal} ({len(path)} steps)"
+                    )
+                    continue  # done with this agent either way
+
+            # -- Generic branch: PICK, RETURN, already-active tasks --
             if active_task is None:
                 next_task = self.world.task_state.get_next_task_for_agent(agent.agent_id)
                 if next_task is None:
                     continue
-                # Activate this task
                 next_task.status = TaskStatus.IN_PROGRESS
                 active_task = next_task
 
-                # Update agent status based on task type
                 if active_task.task_type == TaskType.PICK:
                     agent.status = AgentStatus.MOVING_TO_POD
-                elif active_task.task_type == TaskType.DELIVER:
-                    agent.status = AgentStatus.CARRYING
                 elif active_task.task_type == TaskType.RETURN:
                     agent.status = AgentStatus.RETURNING
 
                 agent.assigned_task_id = active_task.task_id
 
-            # Plan path if agent doesn't have one
             if not agent.has_path:
+                if (active_task.task_type == TaskType.DELIVER
+                        and agent.status == AgentStatus.CARRYING):
+                    queue = station_state.get_queue(active_task.station_id)
+                    if queue and queue.entry_position:
+                        goal = queue.entry_position
+                    else:
+                        goal = active_task.destination
+                else:
+                    goal = active_task.destination
+                if agent.position == goal:
+                    continue  # already at destination, _handle_actions will process
+                extra_blocked = handoff_blocked - {goal, agent.position}
                 path = self.path_planner.plan(
-                    agent, active_task.destination, self.world
+                    agent, goal, self.world,
+                    extra_blocked=extra_blocked if extra_blocked else None,
                 )
                 if path:
                     agent.assign_path(path)
                     self.logger.debug(
                         f"[Tick {tick}] Agent #{agent.agent_id} planned path "
-                        f"to {active_task.destination} ({len(path)} steps)"
+                        f"to {goal} ({len(path)} steps)"
                     )
                 else:
                     self.logger.warning(
                         f"[Tick {tick}] Agent #{agent.agent_id} could not find "
-                        f"path to {active_task.destination}"
+                        f"path to {goal}"
                     )
+                    if agent.position in handoff_blocked:
+                        self._nudge_idle_neighbors(agent, tick)
 
     def _move_agents(self, tick: int):
         """Move each agent one step along their path."""
         for agent in self.world.agents:
+            if agent.status in (AgentStatus.QUEUING, AgentStatus.DELIVERING,
+                                AgentStatus.EXITING):
+                continue
             if agent.is_waiting:
-                continue  # Frozen while performing an action
+                continue
             if agent.has_path:
                 new_pos = agent.advance()
                 if new_pos:
-                    # If carrying a pod, move the pod too
                     if agent.carried_pod_id is not None:
                         pod = self.world.pod_state.get_pod(agent.carried_pod_id)
                         if pod:
@@ -268,6 +366,170 @@ class SimulationEngine:
                     self.logger.debug(
                         f"[Tick {tick}] Agent #{agent.agent_id} moved to {new_pos}"
                     )
+
+    def _check_queue_arrivals(self, tick: int, absorbed_entries: set):
+        """Absorb CARRYING agents at entry_position into queue slots."""
+        for agent in self.world.agents:
+            if agent.status != AgentStatus.CARRYING:
+                continue
+
+            active_task = self.world.task_state.get_active_task_for_agent(agent.agent_id)
+            if active_task is None or active_task.task_type != TaskType.DELIVER:
+                continue
+
+            queue = self.world.station_state.get_queue(active_task.station_id)
+            if queue is None or queue.entry_position is None:
+                continue
+
+            if agent.position != queue.entry_position:
+                continue
+
+            if agent.has_path:
+                agent.clear_path()
+
+            if queue.entry_position in absorbed_entries:
+                continue
+
+            if queue.check_in_from_entry(agent.agent_id, self.world):
+                absorbed_entries.add(queue.entry_position)
+                self.logger.info(
+                    f"[Tick {tick}] Agent #{agent.agent_id} checked into queue "
+                    f"at station {active_task.station_id} (entry={agent.position})"
+                )
+
+    def _clear_stale_entry_paths(self, tick: int):
+        """Clear stale paths for DELIVER agents near a free entry.
+
+        The space-time path planner may schedule waits or detours because
+        it predicted the entry would be occupied.  When the entry has
+        since become free, the stale path wastes ticks.  Clearing it
+        lets ``_plan_and_activate`` re-plan a direct route this same tick.
+        For adjacent agents, assigns a direct 1-step path to entry.
+        """
+        station_state = self.world.station_state
+        claimed_entries = set()
+
+        for agent in self.world.agents:
+            if agent.status != AgentStatus.CARRYING or not agent.has_path:
+                continue
+            active_task = self.world.task_state.get_active_task_for_agent(
+                agent.agent_id
+            )
+            if active_task is None or active_task.task_type != TaskType.DELIVER:
+                continue
+            queue = station_state.get_queue(active_task.station_id)
+            if queue is None or queue.entry_position is None:
+                continue
+
+            remaining = agent.path[agent.path_index:]
+            if not remaining or remaining[-1] != queue.entry_position:
+                continue
+
+            er, ec = queue.entry_position
+            ar, ac = agent.position
+            manhattan = abs(er - ar) + abs(ec - ac)
+            if manhattan > 3:
+                continue
+
+            if len(remaining) <= manhattan:
+                continue
+
+            entry_pos = queue.entry_position
+            if entry_pos in claimed_entries:
+                continue
+
+            entry_blocked = False
+            for other in self.world.agents:
+                if other.agent_id == agent.agent_id:
+                    continue
+                if other.position == entry_pos:
+                    entry_blocked = True
+                    break
+                if other.has_path and other.path_index < len(other.path):
+                    if other.path[other.path_index] == entry_pos:
+                        entry_blocked = True
+                        break
+            if entry_blocked:
+                continue
+
+            if manhattan == 1:
+                agent.assign_path([entry_pos])
+                claimed_entries.add(entry_pos)
+            else:
+                agent.clear_path()
+            self.logger.debug(
+                f"[Tick {tick}] Cleared stale path for Agent #{agent.agent_id} "
+                f"near entry {entry_pos} (dist={manhattan}, "
+                f"remaining={len(remaining)} steps)"
+            )
+
+    def _process_station_exits(self, tick: int):
+        """Two-phase exit: service→exit (1 step), then finalize next tick."""
+        for agent in self.world.agents:
+            if agent.status != AgentStatus.EXITING:
+                continue
+            active_task = self.world.task_state.get_active_task_for_agent(agent.agent_id)
+            if active_task is None:
+                continue
+            queue = self.world.station_state.get_queue(active_task.station_id)
+            if queue is None:
+                continue
+
+            if queue.exit_position and agent.position == queue.exit_position:
+                active_task.status = TaskStatus.COMPLETED
+                agent.clear_path()
+                agent.status = AgentStatus.CARRYING
+                agent.assigned_task_id = None
+                self.logger.info(
+                    f"[Tick {tick}] Agent #{agent.agent_id} finalized exit "
+                    f"at station {active_task.station_id}, pos={agent.position}"
+                )
+                continue
+
+            if queue.release_to_exit(agent.agent_id, self.world):
+                self.logger.info(
+                    f"[Tick {tick}] Agent #{agent.agent_id} moved to exit "
+                    f"at station {active_task.station_id}, pos={agent.position}"
+                )
+
+    def _nudge_idle_neighbors(self, stuck_agent, tick: int):
+        """Nudge idle agents adjacent to *stuck_agent* so it can leave a handoff cell.
+
+        Assigns a 1-step path to each idle neighbor, moving it to a free
+        adjacent cell.  The nudge takes effect this tick's _move_agents,
+        clearing the corridor for the stuck agent on the next tick.
+        """
+        ms = self.world.map_state
+        occupied = {a.position for a in self.world.agents}
+        pod_positions = {
+            p.current_position
+            for p in self.world.pod_state.pods.values()
+            if not p.is_carried
+        }
+        sr, sc = stuck_agent.position
+        for other in self.world.agents:
+            if other.agent_id == stuck_agent.agent_id:
+                continue
+            if other.status != AgentStatus.IDLE or other.has_path:
+                continue
+            odr = abs(other.position[0] - sr)
+            odc = abs(other.position[1] - sc)
+            if odr + odc > 2:
+                continue
+            for nr, nc in ms.get_neighbors(other.position[0], other.position[1]):
+                if not ms.is_walkable(nr, nc):
+                    continue
+                if (nr, nc) in occupied or (nr, nc) in pod_positions:
+                    continue
+                other.assign_path([(nr, nc)])
+                occupied.discard(other.position)
+                occupied.add((nr, nc))
+                self.logger.info(
+                    f"[Tick {tick}] Nudge: Agent #{other.agent_id} "
+                    f"{other.position} -> ({nr},{nc}) to clear handoff "
+                    f"for Agent #{stuck_agent.agent_id}"
+                )
+                break
 
     def _detect_conflicts(self, tick: int, prev_positions: dict):
         """Detect vertex conflicts and oncoming (head-on swap) conflicts.
@@ -329,6 +591,9 @@ class SimulationEngine:
             if active_task is None:
                 continue
 
+            if agent.status == AgentStatus.EXITING:
+                continue
+
             # --- Countdown in progress: decrement and skip ---
             if agent.is_waiting:
                 agent.wait_ticks -= 1
@@ -387,7 +652,6 @@ class SimulationEngine:
                 agent.clear_path()
 
             elif active_task.task_type == TaskType.DELIVER:
-                agent.status = AgentStatus.DELIVERING
                 pod = self.world.pod_state.get_pod(active_task.pod_id)
                 if pod:
                     self.logger.info(
@@ -396,7 +660,6 @@ class SimulationEngine:
                     )
                     order = self.world.order_state.orders.get(active_task.order_id)
                     if order:
-                        # 扣减 pod 中对应 SKU 的数量 / Deduct SKU quantities
                         for sku, demand in order.sku_demands.items():
                             if sku in pod.sku_inventory:
                                 pod.sku_inventory[sku] = max(
@@ -404,8 +667,7 @@ class SimulationEngine:
                                 )
                         order.mark_pod_delivered(active_task.pod_id)
 
-                active_task.status = TaskStatus.COMPLETED
-                agent.clear_path()
+                agent.status = AgentStatus.EXITING
 
             elif active_task.task_type == TaskType.RETURN:
                 pod = self.world.pod_state.get_pod(active_task.pod_id)
@@ -487,17 +749,24 @@ class SimulationEngine:
             self._reset_agent_to_idle(agent)
             return
 
-        station_pos = self.world.map_state.station_positions.get(
+        station_pos = self.world.station_state.get_service_position(
             order.station_id
         )
+        if station_pos is None:
+            station_pos = self.world.map_state.station_positions.get(
+                order.station_id
+            )
         if station_pos is None:
             self._reset_agent_to_idle(agent)
             return
 
+        exit_pos = self.world.station_state.get_exit_position(order.station_id)
+        return_source = exit_pos or station_pos
+
         pod_return_planner = self.task_assigner.pod_return_planner
         if pod_return_planner is not None:
             return_dest = pod_return_planner.plan_return(
-                alt_pod, station_pos, self.world
+                alt_pod, return_source, self.world
             )
         else:
             return_dest = alt_pod.home_position
@@ -521,16 +790,18 @@ class SimulationEngine:
         )
         new_deliver.agent_id = agent.agent_id
         new_deliver.status = TaskStatus.ASSIGNED
+        new_deliver.station_id = order.station_id
 
         new_return = Task(
             task_type=TaskType.RETURN,
             order_id=order.order_id,
             pod_id=alt_pod.pod_id,
-            source=station_pos,
+            source=return_source,
             destination=return_dest,
         )
         new_return.agent_id = agent.agent_id
         new_return.status = TaskStatus.ASSIGNED
+        new_return.station_id = order.station_id
 
         task_state.add_task(new_pick)
         task_state.add_task(new_deliver)

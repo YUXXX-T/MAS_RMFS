@@ -12,6 +12,7 @@ import random
 from typing import List, Dict
 
 from Policies.PodInitializer.base_pod_initializer import BasePodInitializer
+from WorldState.map_state import CellType
 from WorldState.pod_state import Pod
 
 
@@ -75,7 +76,8 @@ class DefaultPodInitializer(BasePodInitializer):
 
             for r in range(zone.origin_row, zone.origin_row + zone.num_rows):
                 for c in range(zone.origin_col, zone.origin_col + zone.num_cols):
-                    # 从该类型的 SKU 池中随机抽取 skus_per_pod 个
+                    if world_state.map_state.grid[r][c] != CellType.POD_HOME:
+                        continue
                     actual_n = min(skus_per_pod, len(pool))
                     chosen_skus = random.sample(pool, actual_n)
 

@@ -14,7 +14,9 @@ class AgentStatus(Enum):
     MOVING_TO_POD = auto()  # Navigating to pick up a pod
     CARRYING = auto()       # Moving with a pod toward the station
     DELIVERING = auto()     # At station, delivering the pod
+    QUEUING = auto()        # Waiting in station queue zone
     RETURNING = auto()      # Returning the pod to its home
+    EXITING = auto()        # Processing done, waiting to exit station zone
     MOVING = auto()         # Generic movement (e.g., repositioning)
 
 

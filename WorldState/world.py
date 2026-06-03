@@ -13,6 +13,7 @@ from WorldState.agent_state import AgentState
 from WorldState.order_state import OrderState
 from WorldState.task_state import TaskState
 from WorldState.pod_state import PodState, Pod
+from WorldState.station_state import StationState
 
 
 class WorldState:
@@ -44,6 +45,9 @@ class WorldState:
         # 初始化地图
         self.map_state = MapState(config.map)
 
+        # 初始化站点队列区域 (before agent placement so zone cells are excluded)
+        self.station_state = StationState(config, self.map_state)
+
         # 在起始位置初始化智能体
         # 当 starts 列表不够时，自动在 FREE 格子上分散放置
         self.agents: List[AgentState] = []
@@ -51,13 +55,17 @@ class WorldState:
         num_robots = config.robots.num_robots
 
         if len(explicit_starts) >= num_robots:
-            # starts 列表足够，直接使用
             for i in range(num_robots):
                 self.agents.append(AgentState(agent_id=i, start_position=explicit_starts[i]))
         else:
-            # 收集所有 FREE 格子，用于分配缺失的起始位置
             used = set(tuple(s) for s in explicit_starts)
             pod_homes = set(self.map_state.pod_home_positions)
+            handoff = set()
+            for sq in self.station_state.stations.values():
+                if sq.entry_position:
+                    handoff.add(sq.entry_position)
+                if sq.exit_position:
+                    handoff.add(sq.exit_position)
             free_cells = [
                 (r, c)
                 for r in range(self.map_state.rows)
@@ -65,6 +73,7 @@ class WorldState:
                 if self.map_state.grid[r][c] == CellType.FREE
                 and (r, c) not in used
                 and (r, c) not in pod_homes
+                and (r, c) not in handoff
             ]
             random.shuffle(free_cells)
 
