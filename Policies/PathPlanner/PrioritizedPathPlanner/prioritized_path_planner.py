@@ -88,6 +88,7 @@ class PrioritizedPathPlanner(BasePathPlanner):
         self._vertex_res: Set[Tuple[int, int, int]] = set()
         self._edge_res: Set[Tuple[int, int, int, int, int]] = set()
         self._static_blocked: Set[Tuple[int, int]] = set()
+        self._zone_occupied: Set[Tuple[int, int]] = set()
         self._last_tick: int = -1
         self._walkable: np.ndarray = None  # cached walkable grid for Cython
 
@@ -142,6 +143,11 @@ class PrioritizedPathPlanner(BasePathPlanner):
                 if not ag.has_path and not ag.is_waiting
                 and ag.status not in _ZONE_STATUSES
             }
+            self._zone_occupied = {
+                ag.position
+                for ag in world_state.agents
+                if ag.status in _ZONE_STATUSES
+            }
             if _USE_CYTHON and self._walkable is None:
                 ms = world_state.map_state
                 w = np.zeros((ms.rows, ms.cols), dtype=np.uint8)
@@ -160,10 +166,11 @@ class PrioritizedPathPlanner(BasePathPlanner):
         # Build per-agent static_blocked:
         #   pods (if carrying) + idle agents (excluding self) + extra_blocked - goal
         idle_others = self._idle_agent_positions - {start}
+        zone_others = self._zone_occupied - {start}
         if agent.carried_pod_id is not None:
-            static_blocked = self._static_blocked | idle_others
+            static_blocked = self._static_blocked | idle_others | zone_others
         else:
-            static_blocked = idle_others
+            static_blocked = idle_others | zone_others
         if extra_blocked:
             static_blocked = static_blocked | extra_blocked
         static_blocked = static_blocked - {goal}
@@ -197,14 +204,13 @@ class PrioritizedPathPlanner(BasePathPlanner):
         """
         _ZONE_STATUSES = (AgentStatus.QUEUING, AgentStatus.DELIVERING, AgentStatus.EXITING)
         for agent in world_state.agents:
-            if agent.status in _ZONE_STATUSES:
-                continue
-            if not agent.has_path and not agent.is_waiting:
-                continue
-
             pos = agent.position
-            # Reserve current position at time-step 0
             self._vertex_res.add((pos[0], pos[1], 0))
+
+            if agent.status in _ZONE_STATUSES:
+                for t in range(1, self.max_horizon + 1):
+                    self._vertex_res.add((pos[0], pos[1], t))
+                continue
 
             if agent.is_waiting:
                 for t in range(1, agent.wait_ticks + 1 + self.goal_reserve):
@@ -223,6 +229,10 @@ class PrioritizedPathPlanner(BasePathPlanner):
                     prev = nxt
                 for extra in range(remaining + 1, remaining + 1 + self.goal_reserve):
                     self._vertex_res.add((prev[0], prev[1], extra))
+
+            else:
+                for t in range(1, self.max_horizon + 1):
+                    self._vertex_res.add((pos[0], pos[1], t))
 
 
     def _reserve_path(

@@ -280,6 +280,12 @@ class SimulationEngine:
                         continue  # station at capacity, defer
 
                     goal = queue.entry_position
+
+                    if any(a.position == goal and a.agent_id != agent.agent_id
+                           and not a.has_path
+                           for a in self.world.agents):
+                        queue.unreserve(agent.agent_id)
+                        continue
                     extra_blocked = handoff_blocked - {goal, agent.position}
                     path = self.path_planner.plan(
                         agent, goal, self.world, extra_blocked=extra_blocked
@@ -290,17 +296,18 @@ class SimulationEngine:
                             f"[Tick {tick}] Agent #{agent.agent_id} could not find "
                             f"path to entry {goal} for DELIVER"
                         )
-                        continue  # path failed, keep task ASSIGNED
+                        continue
 
                     next_task.status = TaskStatus.IN_PROGRESS
                     agent.status = AgentStatus.CARRYING
                     agent.assigned_task_id = next_task.task_id
                     agent.assign_path(path)
+                    agent.plan_failed_streak = 0
                     self.logger.debug(
                         f"[Tick {tick}] Agent #{agent.agent_id} DELIVER → "
                         f"entry {goal} ({len(path)} steps)"
                     )
-                    continue  # done with this agent either way
+                    continue
 
             # -- Generic branch: PICK, RETURN, already-active tasks --
             if active_task is None:
